@@ -1,0 +1,12 @@
+# Derlenmis ikili
+/kasa
+
+# Sir tasiyan dosyalar: sifreli olsalar bile hicbir yerde depoya girmez.
+# Sifreli yedek depoda cevrimdisi parola denemesine aciktir; yedekler
+# depo disindaki hedeflerde durur (kasa hedef ekle <dizin>).
+*.age
+
+# Yerel keychain ve durum dosyalari (normalde repo disinda yasarlar)
+*.keychain-db
+profiles.json
+audit.log

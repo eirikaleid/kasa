@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="480" viewBox="0 0 900 480" role="img" aria-labelledby="t d">
+  <title id="t">How kasa works</title>
+  <desc id="d">A human unlocks a separate keychain. Three paths lead out: kasa get is refused for agents, kasa run injects secrets into an allow-listed command, and capability commands such as mail send use the secret inside kasa.</desc>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8b949e"/>
+    </marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3fb950"/>
+    </marker>
+  </defs>
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; }
+    .mono { font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; }
+  </style>
+
+  <rect width="900" height="480" rx="14" fill="#0d1117"/>
+  <rect x="0.5" y="0.5" width="899" height="479" rx="13.5" fill="none" stroke="#30363d"/>
+
+  <!-- human -->
+  <rect x="30" y="190" width="170" height="100" rx="12" fill="#161b22" stroke="#30363d"/>
+  <text x="115" y="226" text-anchor="middle" class="sans" font-size="17" font-weight="600" fill="#f0f6fc">Human</text>
+  <text x="115" y="248" text-anchor="middle" class="sans" font-size="13" fill="#8b949e">interactive terminal (TTY)</text>
+  <text x="115" y="270" text-anchor="middle" class="mono" font-size="12" fill="#58a6ff">add · unlock</text>
+
+  <!-- human -> keychain -->
+  <line x1="202" y1="240" x2="258" y2="240" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arg)"/>
+
+  <!-- keychain -->
+  <rect x="260" y="165" width="210" height="150" rx="14" fill="#10241a" stroke="#3fb950" stroke-width="2"/>
+  <text x="365" y="205" text-anchor="middle" class="sans" font-size="18" font-weight="700" fill="#f0f6fc">Locked keychain</text>
+  <text x="365" y="230" text-anchor="middle" class="mono" font-size="12" fill="#7ee787">kasa.keychain-db</text>
+  <text x="365" y="260" text-anchor="middle" class="sans" font-size="13" fill="#8b949e">separate from login keychain</text>
+  <text x="365" y="280" text-anchor="middle" class="sans" font-size="13" fill="#8b949e">auto-locks after 12 h</text>
+  <text x="365" y="300" text-anchor="middle" class="sans" font-size="13" fill="#8b949e">locked: exit code 75</text>
+
+  <!-- connectors keychain -> three paths -->
+  <path d="M472 240 C 515 240, 515 80, 556 80" fill="none" stroke="#8b949e" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+  <path d="M472 240 L 556 240" fill="none" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arg)"/>
+  <path d="M472 240 C 515 240, 515 400, 556 400" fill="none" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arg)"/>
+
+  <!-- path 1: get -->
+  <rect x="560" y="30" width="310" height="100" rx="12" fill="#161b22" stroke="#30363d"/>
+  <text x="578" y="58" class="mono" font-size="15" font-weight="700" fill="#f0f6fc">kasa get &lt;key&gt;</text>
+  <text x="578" y="90" class="sans" font-size="13" fill="#8b949e">prints the raw value: human + TTY only</text>
+  <rect x="740" y="18" width="116" height="24" rx="12" fill="#3d1418" stroke="#f85149"/>
+  <text x="798" y="34" text-anchor="middle" class="sans" font-size="12.5" font-weight="600" fill="#ff7b72">agent: refused</text>
+
+  <!-- path 2: run -->
+  <rect x="560" y="190" width="310" height="100" rx="12" fill="#161b22" stroke="#3fb950"/>
+  <text x="578" y="218" class="mono" font-size="15" font-weight="700" fill="#f0f6fc">kasa run &lt;profile&gt; -- cmd</text>
+  <text x="578" y="246" class="sans" font-size="13" fill="#8b949e">allow list + environment allow-list</text>
+  <text x="578" y="268" class="sans" font-size="13" fill="#8b949e">then exec: secret reaches only the command</text>
+  <rect x="740" y="178" width="116" height="24" rx="12" fill="#10241a" stroke="#3fb950"/>
+  <text x="798" y="194" text-anchor="middle" class="sans" font-size="12.5" font-weight="600" fill="#7ee787">agent: allowed</text>
+
+  <!-- path 3: capability -->
+  <rect x="560" y="350" width="310" height="100" rx="12" fill="#161b22" stroke="#3fb950"/>
+  <text x="578" y="378" class="mono" font-size="15" font-weight="700" fill="#f0f6fc">kasa mail send</text>
+  <text x="578" y="406" class="sans" font-size="13" fill="#8b949e">capability command: the secret is used</text>
+  <text x="578" y="428" class="sans" font-size="13" fill="#8b949e">inside kasa and never leaves the process</text>
+  <rect x="740" y="338" width="116" height="24" rx="12" fill="#10241a" stroke="#3fb950"/>
+  <text x="798" y="354" text-anchor="middle" class="sans" font-size="12.5" font-weight="600" fill="#7ee787">agent: allowed</text>
+
+  <!-- audit note -->
+  <text x="30" y="440" class="sans" font-size="13" fill="#6e7681">Every access is written to the audit log:</text>
+  <text x="30" y="459" class="sans" font-size="13" fill="#6e7681">key names, never values.</text>
+</svg>

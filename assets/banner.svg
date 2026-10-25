@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="260" viewBox="0 0 900 260" role="img" aria-labelledby="t d">
+  <title id="t">kasa</title>
+  <desc id="d">Secrets your AI agent can use, but never see</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#161b26"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3fb950"/>
+      <stop offset="1" stop-color="#2ea8a0"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="260" rx="14" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="899" height="259" rx="13.5" fill="none" stroke="#30363d"/>
+
+  <!-- faint grid of dots -->
+  <g fill="#21262d">
+    <circle cx="640" cy="40" r="2"/><circle cx="680" cy="40" r="2"/><circle cx="720" cy="40" r="2"/><circle cx="760" cy="40" r="2"/><circle cx="800" cy="40" r="2"/><circle cx="840" cy="40" r="2"/>
+    <circle cx="640" cy="220" r="2"/><circle cx="680" cy="220" r="2"/><circle cx="720" cy="220" r="2"/><circle cx="760" cy="220" r="2"/><circle cx="800" cy="220" r="2"/><circle cx="840" cy="220" r="2"/>
+  </g>
+
+  <!-- vault icon -->
+  <g transform="translate(70 62)">
+    <rect x="0" y="0" width="136" height="136" rx="26" fill="#0d1117" stroke="url(#acc)" stroke-width="5"/>
+    <circle cx="68" cy="68" r="38" fill="none" stroke="#30363d" stroke-width="5"/>
+    <circle cx="68" cy="68" r="24" fill="none" stroke="url(#acc)" stroke-width="5"/>
+    <circle cx="68" cy="68" r="6" fill="url(#acc)"/>
+    <g stroke="url(#acc)" stroke-width="5" stroke-linecap="round">
+      <line x1="68" y1="44" x2="68" y2="30"/>
+      <line x1="68" y1="92" x2="68" y2="106"/>
+      <line x1="44" y1="68" x2="30" y2="68"/>
+      <line x1="92" y1="68" x2="106" y2="68"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text x="246" y="146" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="92" font-weight="700" letter-spacing="-2" fill="#f0f6fc">kasa</text>
+  <text x="249" y="188" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif" font-size="25" fill="#8b949e">Secrets your AI agent can use <tspan fill="#3fb950" font-weight="600">but never see</tspan></text>
+  <text x="249" y="222" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#6e7681">$ kasa run github -- gh pr list</text>
+</svg>

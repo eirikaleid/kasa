@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-labelledby="t d">
+  <title id="t">kasa terminal demo</title>
+  <desc id="d">Adding a secret with hidden input, listing keys, an agent session where kasa get is refused, and kasa run succeeding with an injected token.</desc>
+  <style>
+    .m { font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 15px; }
+  </style>
+  <rect width="900" height="470" rx="12" fill="#0d1117"/>
+  <rect x="0.5" y="0.5" width="899" height="469" rx="11.5" fill="none" stroke="#30363d"/>
+
+  <!-- title bar -->
+  <path d="M0 12 A12 12 0 0 1 12 0 H888 A12 12 0 0 1 900 12 V40 H0 Z" fill="#161b22"/>
+  <line x1="0" y1="40" x2="900" y2="40" stroke="#30363d"/>
+  <circle cx="26" cy="20" r="6.5" fill="#ff5f57"/>
+  <circle cx="48" cy="20" r="6.5" fill="#febc2e"/>
+  <circle cx="70" cy="20" r="6.5" fill="#28c840"/>
+  <text x="450" y="25" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="13" fill="#8b949e">Terminal: kasa</text>
+
+  <!-- human session -->
+  <text x="24" y="72" class="m" fill="#6e7681"># you, in a terminal</text>
+  <text x="24" y="98" class="m" fill="#f0f6fc"><tspan fill="#3fb950">$</tspan> kasa add github/token</text>
+  <text x="24" y="122" class="m" fill="#8b949e">value (hidden): <tspan fill="#6e7681">••••••••••••••••</tspan></text>
+  <text x="24" y="146" class="m" fill="#c9d1d9">saved: github/token</text>
+  <text x="24" y="176" class="m" fill="#f0f6fc"><tspan fill="#3fb950">$</tspan> kasa ls</text>
+  <text x="24" y="200" class="m" fill="#c9d1d9">github/token</text>
+  <text x="24" y="224" class="m" fill="#c9d1d9">mail/pass</text>
+
+  <!-- divider -->
+  <line x1="24" y1="248" x2="876" y2="248" stroke="#30363d" stroke-dasharray="4 4"/>
+
+  <!-- agent session -->
+  <text x="24" y="276" class="m" fill="#6e7681"># inside an AI agent session</text>
+  <text x="24" y="302" class="m" fill="#f0f6fc"><tspan fill="#3fb950">$</tspan> kasa get github/token</text>
+  <text x="24" y="326" class="m" fill="#ff7b72">denied: raw secrets cannot be read from an agent session</text>
+  <text x="24" y="356" class="m" fill="#f0f6fc"><tspan fill="#3fb950">$</tspan> kasa run github -- gh pr list</text>
+  <text x="24" y="380" class="m" fill="#c9d1d9">#42</text>
+  <text x="84" y="380" class="m" fill="#c9d1d9">Fix flaky test</text>
+  <text x="360" y="380" class="m" fill="#8b949e">fix-flaky</text>
+  <text x="520" y="380" class="m" fill="#8b949e">about 1 hour ago</text>
+  <text x="24" y="404" class="m" fill="#c9d1d9">#41</text>
+  <text x="84" y="404" class="m" fill="#c9d1d9">Update documentation</text>
+  <text x="360" y="404" class="m" fill="#8b949e">docs-update</text>
+  <text x="520" y="404" class="m" fill="#8b949e">about 3 hours ago</text>
+  <text x="24" y="440" class="m" fill="#7ee787">✓ the agent got the output, never the token</text>
+</svg>
