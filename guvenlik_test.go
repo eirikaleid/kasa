@@ -462,3 +462,20 @@ func TestParolaSatiriCoz(t *testing.T) {
 		}
 	}
 }
+
+// Ajan var olan bir sirri `kasa add` ile degistiremez; yeni anahtar ekleyebilir.
+func TestAjanVarOlaniDegistiremez(t *testing.T) {
+	geciciKasa(t)
+	if err := kcSet("t/var", "ilk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := eklemeKapisi("t/var"); err == nil || !strings.Contains(err.Error(), "reddedildi") {
+		t.Fatalf("ajan var olan sirri degistirebildi: %v", err)
+	}
+	if err := eklemeKapisi("t/yeni"); err != nil {
+		t.Fatalf("ajan yeni anahtar ekleyemedi: %v", err)
+	}
+	if v, _ := kcGet("t/var"); v != "ilk" {
+		t.Fatalf("deger degisti: %q", v)
+	}
+}

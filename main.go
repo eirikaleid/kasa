@@ -298,6 +298,9 @@ func cmdAdd(args []string) error {
 	if err := requireKasa(); err != nil {
 		return err
 	}
+	if err := eklemeKapisi(key); err != nil {
+		return err
+	}
 	var val string
 	var err error
 	if len(args) > 1 && args[1] == "--stdin" {
@@ -318,6 +321,35 @@ func cmdAdd(args []string) error {
 	audit("OK", "add", key, "")
 	fmt.Println("kaydedildi: " + key)
 	return nil
+}
+
+// eklemeKapisi: ajan yeni anahtar ekleyebilir (ornek: bir aracin urettigi token'i
+// `kasa add --stdin` ile kaydetmesi), ama VAR OLAN bir sirri degistiremez; kilitli
+// profile ait anahtarlar ise yalniz insan + TTY ile yazilir. Aksi halde ajan
+// kilitli bir aracin kullandigi sirri kendi degeriyle degistirip araci kendi
+// hesabina yonlendirebilirdi.
+func eklemeKapisi(key string) error {
+	c, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if c.kilitliRef[anahtarNormal(key)] {
+		return requireHuman("add", key)
+	}
+	a := agentName()
+	if a == "" {
+		return nil
+	}
+	_, err = kcGet(key)
+	if err == nil {
+		audit("DENIED", "add", key, "ajan var olan sirri degistiremez: "+a)
+		return fmt.Errorf("reddedildi: var olan bir sir ajan oturumundan degistirilemez (%s)\n"+
+			"  degistirmek icin ayri bir Terminal'de kendin calistir: kasa add %s", a, key)
+	}
+	if errors.Is(err, errAnahtarYok) {
+		return nil
+	}
+	return err
 }
 
 func cmdLs() error {
