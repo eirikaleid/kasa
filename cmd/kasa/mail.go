@@ -10,14 +10,14 @@ import (
 	"time"
 )
 
-// smtpZamanAsimi: baglanti kurma ve tum oturum icin ust sinir; asili kalan
-// bir sunucu kasa'yi (ve onu bekleyen otomasyonu) sonsuza dek bekletmesin.
+// SMTP timeouts: upper bounds for connecting and for the whole session, so a
+// hung server cannot block kasa (and the automation waiting on it) forever.
 const (
 	smtpBaglantiSuresi = 10 * time.Second
 	smtpOturumSuresi   = 2 * time.Minute
 )
 
-// yerelHost: STARTTLS zorunlulugunun tek istisnasi (yerel aktarici).
+// yerelHost: the only exception to the STARTTLS requirement (local relay).
 func yerelHost(h string) bool {
 	if strings.EqualFold(h, "localhost") {
 		return true
@@ -26,17 +26,18 @@ func yerelHost(h string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// sendMail: SMTP kimlik bilgileri process icinde kalir, hicbir yere yazilmaz.
+// sendMail: SMTP credentials stay inside the process and are never written anywhere.
 //
-// Bilinen risk: smtp.host/port profiles.json'dan gelir. Kilitli OLMAYAN bir
-// profilde bu dosya kullanicinin (ve ajanin) yazabildigi bir dosya: host'u
-// kendi sunucusuna ceviren biri, kendi sertifikasiyla STARTTLS'i gecip
-// SMTP_USER/SMTP_PASS'i AUTH'ta duz alabilir (TLS dogrulamasi yalniz host adinin
-// sertifikasini kanitlar, dogru sunucu oldugunu degil). Mail parolasi
-// tasiyan profili /usr/local/etc/kasa/profiles.json'a (kilitli) koy.
+// Known risk: smtp.host/port come from profiles.json. For a profile that is
+// NOT locked, that file is writable by the user (and the agent): someone who
+// points the host at their own server can pass STARTTLS with their own
+// certificate and receive SMTP_USER/SMTP_PASS in plain text during AUTH (TLS
+// verification only proves the certificate matches the host name, not that
+// it is the right server). Put the profile that carries the mail password in
+// /usr/local/etc/kasa/profiles.json (locked).
 func sendMail(p Profile, to []string, subject, body string) error {
 	if p.SMTP == nil {
-		return fmt.Errorf("profilde smtp ayari yok")
+		return fmt.Errorf("profile has no smtp settings")
 	}
 	env, err := p.resolve()
 	if err != nil {
@@ -44,7 +45,7 @@ func sendMail(p Profile, to []string, subject, body string) error {
 	}
 	user, pass := env["SMTP_USER"], env["SMTP_PASS"]
 	if user == "" || pass == "" {
-		return fmt.Errorf("profilde SMTP_USER / SMTP_PASS eslesmesi eksik")
+		return fmt.Errorf("profile is missing the SMTP_USER / SMTP_PASS mapping")
 	}
 	from := p.SMTP.From
 	if from == "" {
@@ -56,16 +57,16 @@ func sendMail(p Profile, to []string, subject, body string) error {
 
 	conn, err := net.DialTimeout("tcp", addr, smtpBaglantiSuresi)
 	if err != nil {
-		return fmt.Errorf("smtp baglanti: %w", err)
+		return fmt.Errorf("smtp connection: %w", err)
 	}
 	if err := conn.SetDeadline(time.Now().Add(smtpOturumSuresi)); err != nil {
 		conn.Close()
-		return fmt.Errorf("smtp baglanti: %w", err)
+		return fmt.Errorf("smtp connection: %w", err)
 	}
 	c, err := smtp.NewClient(conn, p.SMTP.Host)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("smtp baglanti: %w", err)
+		return fmt.Errorf("smtp connection: %w", err)
 	}
 	defer c.Close()
 	if ok, _ := c.Extension("STARTTLS"); ok {
@@ -73,19 +74,19 @@ func sendMail(p Profile, to []string, subject, body string) error {
 			return fmt.Errorf("starttls: %w", err)
 		}
 	} else if !yerelHost(p.SMTP.Host) {
-		// Eskiden STARTTLS yoksa duz metinle devam ediliyordu; araya giren biri
-		// uzantiyi silip parolayi duz okuyabilirdi.
-		return fmt.Errorf("smtp sunucusu %s STARTTLS sunmuyor; parola sifresiz gonderilmez", p.SMTP.Host)
+		// It used to continue in plain text when STARTTLS was missing; a
+		// man-in-the-middle could strip the extension and read the password.
+		return fmt.Errorf("smtp server %s does not offer STARTTLS; the password is never sent unencrypted", p.SMTP.Host)
 	}
 	if err := c.Auth(smtp.PlainAuth("", user, pass, p.SMTP.Host)); err != nil {
-		return fmt.Errorf("kimlik dogrulama basarisiz (sifre/token yanlis olabilir): %w", err)
+		return fmt.Errorf("authentication failed (password/token may be wrong): %w", err)
 	}
 	if err := c.Mail(from); err != nil {
 		return err
 	}
 	for _, r := range to {
 		if err := c.Rcpt(r); err != nil {
-			return fmt.Errorf("alici %s: %w", r, err)
+			return fmt.Errorf("recipient %s: %w", r, err)
 		}
 	}
 	w, err := c.Data()

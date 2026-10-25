@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Standard Go layout: source moved to `cmd/kasa/` with English file names; module path is now `github.com/eirikaleid/kasa`. Build with `make install` or `go build ./cmd/kasa`.
+- All CLI output, errors, help text and code comments are in English.
+- English command and flag names are primary (`target add|rm`, `backup`, `backup-password status|set|rm`, `export --target --overwrite`, `mail --profile --subject --body`); the old Turkish names still work as hidden aliases.
+- Audit log: `who` is now `human`, detail notes are English; action names (`hedef.ekle`, ...) and backup file names are unchanged.
+
 ## 1.0.0 — first public release
 
 - Separate, lockable macOS keychain for secrets (`kasa init`, `unlock`, `lock`, `status`), auto-locking after 12 hours of inactivity; macOS password dialog unlock (`kasa unlock --gui`) and a daily reminder (`kasa morning`).

@@ -1,4 +1,4 @@
-module kasa
+module github.com/eirikaleid/kasa
 
 go 1.27.0
 

@@ -7,10 +7,11 @@ import (
 	"time"
 )
 
-// Sabah hatirlaticisi (LaunchAgent, 10 dk'da bir; contrib/launchd): kasa bugun
-// hic acilmadiysa macOS sifre penceresiyle sorar. Iptal edilirse sonraki
-// koşuda yine sorar; o gun bir kez acildiysa bir daha sormaz, kilit
-// suresi dolup aksam kilitlense bile.
+// Morning reminder (LaunchAgent, every 10 min; contrib/launchd): if the vault
+// has not been unlocked at all today, prompts with the macOS password dialog.
+// If cancelled, it asks again on the next run; once it has been unlocked that
+// day it never asks again, even if the lock timeout expires and it locks in
+// the evening.
 
 const sabahBaslangicSaati = 7
 
@@ -20,7 +21,7 @@ func sabahIsaretYolu(gun time.Time) string {
 
 func stateDir() string { return filepath.Join(kasaEvi(), ".local", "state", "kasa") }
 
-// sabahIsaretle: bugunun acildigini kaydeder. Eski isaretleri temizler.
+// sabahIsaretle: records that the vault was unlocked today. Removes old markers.
 func sabahIsaretle() {
 	_ = os.MkdirAll(stateDir(), 0o700)
 	bugun := sabahIsaretYolu(time.Now())
@@ -38,7 +39,7 @@ func bugunAcildi() bool {
 	return err == nil
 }
 
-// sabahSormali: pencere acilmali mi. Saf fonksiyon (test icin).
+// sabahSormali: whether the dialog should be shown. Pure function (for tests).
 func sabahSormali(saat int, acildi, kilitli bool) bool {
 	return saat >= sabahBaslangicSaati && !acildi && kilitli
 }
@@ -47,19 +48,20 @@ func cmdSabah() error {
 	if !keychainExists() || isAgent() {
 		return nil
 	}
-	// Gun isaretini yalnizca gercek acilis koyar: dun aksam acilip sabah hala
-	// acik olan kasa "bugun acildi" sayilsaydi, ogle kilitlenince hic sorulmazdi.
+	// Only a real unlock sets the day marker: if a vault unlocked last evening
+	// and still open this morning counted as "unlocked today", nothing would
+	// ever prompt once it locks at noon.
 	if !sabahSormali(time.Now().Hour(), bugunAcildi(), isLocked()) {
 		return nil
 	}
 	if err := kcPencereyleAc(); err != nil {
-		// Iptal ariza degil: 10 dk sonra yine sorulur.
-		audit("FAIL", "unlock", "sabah", err.Error())
-		fmt.Println("sabah: " + err.Error() + " — 10 dk sonra yine sorulacak")
+		// Cancelling is not a failure: it will ask again in 10 min.
+		audit("FAIL", "unlock", "morning", err.Error())
+		fmt.Println("morning: " + err.Error() + " — will ask again in 10 min")
 		return nil
 	}
-	audit("OK", "unlock", "sabah", "")
+	audit("OK", "unlock", "morning", "")
 	acildiktanSonra()
-	fmt.Println("sabah: kasa acildi")
+	fmt.Println("morning: vault unlocked")
 	return nil
 }

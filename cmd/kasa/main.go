@@ -1,10 +1,11 @@
-// kasa - sirlari macOS keychain'de tutan, ajanlara ham deger vermeyen kucuk CLI.
+// kasa - a small CLI that keeps secrets in the macOS keychain and never hands
+// raw values to agents.
 //
-// Tasarim: sirlar ayri ve kilitlenebilir bir keychain'de yasar. Ham degeri
-// yalnizca insan, interaktif bir terminalden okuyabilir. Ajan oturumlari
-// (Claude Code vb.) sirri gormeden is yapar: ya bir profil uzerinden
-// izin verilmis bir komuta env olarak enjekte edilir, ya da kasa'nin kendi
-// yetenekleri (ornegin mail gonderme) kullanilir.
+// Design: secrets live in a separate, lockable keychain. Only a human at an
+// interactive terminal can read a raw value. Agent sessions (Claude Code etc.)
+// get work done without seeing the secret: it is either injected as an env var
+// into an allowed command through a profile, or kasa's own capabilities (for
+// example sending mail) are used.
 package main
 
 import (
@@ -35,7 +36,7 @@ func main() {
 		err = cmdInit()
 	case "unlock":
 		err = cmdUnlock(os.Args[2:])
-	case "sabah", "morning":
+	case "morning", "sabah":
 		err = cmdSabah()
 	case "lock":
 		err = kcLock()
@@ -61,21 +62,21 @@ func main() {
 		err = cmdExport(os.Args[2:])
 	case "import":
 		err = cmdImport(os.Args[2:])
-	case "hedef", "target", "targets":
+	case "target", "targets", "hedef":
 		err = cmdHedef(os.Args[2:])
-	case "yedek", "backup", "backups":
+	case "backup", "backups", "yedek":
 		err = cmdYedek(os.Args[2:])
-	case "yedek-parola", "backup-password":
+	case "backup-password", "yedek-parola":
 		err = cmdYedekParola(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println("kasa " + version)
 	case "help", "-h", "--help":
 		usage()
 	default:
-		err = fmt.Errorf("bilinmeyen komut: %s", os.Args[1])
+		err = fmt.Errorf("unknown command: %s", os.Args[1])
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "hata: "+err.Error())
+		fmt.Fprintln(os.Stderr, "error: "+err.Error())
 		if errors.Is(err, errKilitli) {
 			os.Exit(75) // EX_TEMPFAIL
 		}
@@ -84,55 +85,56 @@ func main() {
 }
 
 func usage() {
-	fmt.Print(`kasa ` + version + ` - sir deposu
+	fmt.Print(`kasa ` + version + ` - secret store
 
-  kasa init                     kasayi olustur (bir kez)
-  kasa unlock | lock | status   kasayi ac / kilitle / durum
-  kasa unlock --pencere         macOS sifre penceresiyle ac
-  kasa sabah                    bugun acilmadiysa pencereyle sor (LaunchAgent, 10 dk'da bir)
+  kasa init                     create the vault (once)
+  kasa unlock | lock | status   unlock / lock / show state
+  kasa unlock --gui             unlock with the macOS password dialog
+  kasa morning                  prompt with a dialog if not unlocked today (LaunchAgent, every 10 min)
 
-  kasa add <ns/anahtar>         sir ekle (deger gizli sorulur)
-  kasa add <ns/anahtar> --stdin degeri stdin'den al (borulama icin)
-  kasa ls                       anahtarlari listele (deger gostermez)
-  kasa get <ns/anahtar>         ham degeri yaz  [yalnizca insan + TTY]
-  kasa rm  <ns/anahtar>         sil            [yalnizca insan + TTY]
+  kasa add <ns/key>             add a secret (value is prompted, hidden)
+  kasa add <ns/key> --stdin     read the value from stdin (for piping)
+  kasa ls                       list keys (never shows values)
+  kasa get <ns/key>             print the raw value  [human + TTY only]
+  kasa rm  <ns/key>             delete               [human + TTY only]
 
-  kasa run <profil> -- <komut>  profildeki sirlari env olarak verip calistir
-  kasa mail send --profil <p> --to <adres> --konu <s> [--govde <m>|--govde-dosya <f>]
+  kasa run <profile> -- <cmd>   run a command with the profile's secrets as env vars
+  kasa mail send --profile <p> --to <address> --subject <s> [--body <m>|--body-file <f>]
 
-  kasa profile ls | edit        profil tanimlari (~/.config/kasa/profiles.json)
-  kasa audit [-n 30]            erisim gunlugu
+  kasa profile ls | edit        profile definitions (~/.config/kasa/profiles.json)
+  kasa audit [-n 30]            access log
 
-  kasa hedef ls|ekle|sil        yedek hedefleri (dizin: USB, disk, NAS, depo)
-  kasa export                   tum hedeflere sifreli yedek yaz
-  kasa export --hedef <dizin>   tek seferlik hedefe yaz
-  kasa yedek ls                 hangi hedefte hangi yedek var, ne kadar eski
-  kasa yedek-parola durum|ayarla|sil
-                                export parolasini keychain'de tut  [ayarla: yalnizca insan]
-  kasa import <dosya.age>       yedegi bu makineye geri yukle  [init+unlock sonrasi]
+  kasa target ls|add|rm         backup targets (directory: USB, disk, NAS, repo)
+  kasa export                   write an encrypted backup to all targets
+  kasa export --target <dir>    write to a one-off target
+  kasa backup ls                which backup is on which target, and how old
+  kasa backup-password status|set|rm
+                                keep the export password in the keychain  [set: human only]
+  kasa import <file.age>        restore a backup onto this machine  [after init+unlock]
 
-Anahtar bicimi: <alan>/<ad>  ornek: mail/pass, github/token, stripe/live_key
+Key format: <namespace>/<name>  e.g. mail/pass, github/token, stripe/live_key
 `)
 }
 
-// ---- yardimcilar ----
+// ---- helpers ----
 
-// promptSecret: yankisiz okuma. Eskiden `stty` PATH'ten aranip calistiriliyordu
-// (PATH'e sahte stty koyan, yankiyi acik birakabilirdi); artik termios dogrudan.
+// promptSecret: reads input without echo. It used to look up and run `stty`
+// from PATH (someone planting a fake stty on PATH could leave echo on); it now
+// uses termios directly.
 func promptSecret(label string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	eski, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
 	if err != nil {
-		return "", fmt.Errorf("gizli giris icin interaktif terminal gerekli")
+		return "", fmt.Errorf("an interactive terminal is required for hidden input")
 	}
 	fmt.Fprint(os.Stderr, label)
 	yeni := *eski
 	yeni.Lflag &^= unix.ECHO
 	yeni.Lflag |= unix.ICANON | unix.ISIG
 	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &yeni); err != nil {
-		return "", fmt.Errorf("terminal yankisi kapatilamadi: %w", err)
+		return "", fmt.Errorf("could not disable terminal echo: %w", err)
 	}
-	// Ctrl-C'de de yanki geri gelsin.
+	// Restore echo on Ctrl-C as well.
 	sinyal := make(chan os.Signal, 1)
 	signal.Notify(sinyal, os.Interrupt, syscall.SIGTERM)
 	bitti := make(chan struct{})
@@ -173,123 +175,123 @@ func readAllStdin() (string, error) {
 	return strings.TrimRight(sb.String(), "\r\n"), nil
 }
 
-// anahtarBicimi: yeni anahtarlar yalniz kucuk ASCII harf, rakam ve . _ -
-// (bolumler / ile). Buyuk harf ve Unicode yasak: kilitli anahtar adlarinin
-// yazim farkiyla (buyuk harf, benzer gorunen harf) taklit edilmesini zorlastirir.
-// Yalniz yeni ekleme (add) denetlenir; var olan anahtarlar okunmaya, silinmeye
-// ve import edilmeye devam eder.
+// anahtarBicimi: new keys may only use lowercase ASCII letters, digits and . _ -
+// (segments separated by /). Uppercase and Unicode are forbidden: this makes it
+// harder to impersonate locked key names with spelling tricks (uppercase,
+// look-alike characters). Only new additions (add) are checked; existing keys
+// can still be read, deleted and imported.
 var anahtarBicimi = regexp.MustCompile(`^[a-z0-9._-]+(/[a-z0-9._-]+)+$`)
 
 func validKey(k string) error {
 	if !anahtarBicimi.MatchString(k) {
-		return fmt.Errorf("anahtar <alan>/<ad> biciminde ve yalniz [a-z0-9._-] karakterleriyle olmali, ornek: mail/pass")
+		return fmt.Errorf("key must be in <namespace>/<name> form and use only [a-z0-9._-] characters, e.g. mail/pass")
 	}
 	return nil
 }
 
-// ---- komutlar ----
+// ---- commands ----
 
 func cmdInit() error {
 	if keychainExists() {
-		fmt.Println("kasa zaten kurulu: " + keychainPath())
+		fmt.Println("kasa is already set up: " + keychainPath())
 		return nil
 	}
-	fmt.Println("Kasa icin bir ana parola belirle. Bunu yalnizca sen bilirsin;")
-	fmt.Println("kasa kilitliyken hicbir ajan sirlari okuyamaz.")
-	p1, err := promptSecret("ana parola: ")
+	fmt.Println("Choose a master password for the vault. Only you know it;")
+	fmt.Println("while the vault is locked, no agent can read the secrets.")
+	p1, err := promptSecret("master password: ")
 	if err != nil {
 		return err
 	}
 	if len(p1) < 8 {
-		return fmt.Errorf("parola en az 8 karakter olmali")
+		return fmt.Errorf("password must be at least 8 characters")
 	}
-	p2, err := promptSecret("tekrar     : ")
+	p2, err := promptSecret("repeat     : ")
 	if err != nil {
 		return err
 	}
 	if p1 != p2 {
-		return fmt.Errorf("parolalar eslesmedi")
+		return fmt.Errorf("passwords do not match")
 	}
 	if err := kcCreate(p1); err != nil {
 		return err
 	}
 	audit("OK", "init", keychainName(), "")
-	fmt.Println("kuruldu: " + keychainPath())
-	fmt.Printf("acildiktan %d saat sonra kendiliginden kilitlenir (uykuda kilitlenmez). elle: kasa lock\n", kilitSuresiSn/3600)
+	fmt.Println("created: " + keychainPath())
+	fmt.Printf("locks itself %d hours after unlocking (does not lock on sleep). manually: kasa lock\n", kilitSuresiSn/3600)
 	return nil
 }
 
 func cmdUnlock(args []string) error {
 	if !keychainExists() {
-		return fmt.Errorf("kasa yok, once: kasa init")
+		return fmt.Errorf("no vault yet, first run: kasa init")
 	}
 	if isAgent() {
-		audit("DENIED", "unlock", "", "ajan ortami")
-		return fmt.Errorf("reddedildi: kasayi bir ajan acamaz, parolayi sen gir")
+		audit("DENIED", "unlock", "", "agent environment")
+		return fmt.Errorf("denied: an agent cannot unlock the vault, enter the password yourself")
 	}
-	if len(args) > 0 && (args[0] == "--pencere" || args[0] == "--gui") {
+	if len(args) > 0 && (args[0] == "--gui" || args[0] == "--pencere") {
 		if err := kcPencereyleAc(); err != nil {
-			audit("FAIL", "unlock", "pencere", err.Error())
+			audit("FAIL", "unlock", "gui", err.Error())
 			return err
 		}
-		audit("OK", "unlock", "pencere", "")
+		audit("OK", "unlock", "gui", "")
 	} else {
-		p, err := promptSecret("ana parola: ")
+		p, err := promptSecret("master password: ")
 		if err != nil {
 			return err
 		}
 		if err := kcUnlock(p); err != nil {
-			audit("FAIL", "unlock", "", "yanlis parola")
-			return fmt.Errorf("acilamadi: parola yanlis")
+			audit("FAIL", "unlock", "", "wrong password")
+			return fmt.Errorf("could not unlock: wrong password")
 		}
 		audit("OK", "unlock", "", "")
 	}
 	acildiktanSonra()
-	fmt.Printf("kasa acik (%d sa)\n", kilitSuresiSn/3600)
+	fmt.Printf("vault unlocked (%d h)\n", kilitSuresiSn/3600)
 	return nil
 }
 
-// acildiktanSonra: her basarili acilista ayarlari duzeltir ve gunu isaretler.
+// acildiktanSonra: after every successful unlock, fixes settings and marks the day.
 func acildiktanSonra() {
 	if err := kcRemoveFromSearchList(); err != nil {
-		fmt.Fprintln(os.Stderr, "uyari: kasa keychain arama listesinden cikarilamadi: "+err.Error())
+		fmt.Fprintln(os.Stderr, "warning: could not remove the kasa keychain from the search list: "+err.Error())
 	}
 	if err := kcKilitAyari(); err != nil {
-		fmt.Fprintln(os.Stderr, "uyari: kilit suresi ayarlanamadi: "+err.Error())
+		fmt.Fprintln(os.Stderr, "warning: could not set the lock timeout: "+err.Error())
 	}
 	sabahIsaretle()
 }
 
 func cmdStatus() error {
-	fmt.Println("kasa      : " + keychainPath())
+	fmt.Println("vault     : " + keychainPath())
 	if !keychainExists() {
-		fmt.Println("durum     : kurulmamis (kasa init)")
+		fmt.Println("state     : not set up (kasa init)")
 		return nil
 	}
 	locked := isLocked()
 	if locked {
-		fmt.Println("durum     : KILITLI (kasa unlock)")
+		fmt.Println("state     : LOCKED (kasa unlock)")
 	} else {
-		fmt.Println("durum     : acik")
+		fmt.Println("state     : unlocked")
 	}
 	if !locked {
 		if keys, err := kcList(); err == nil {
-			fmt.Printf("anahtar   : %d\n", len(keys))
+			fmt.Printf("keys      : %d\n", len(keys))
 		}
 	}
 	c, _ := loadConfig()
-	fmt.Printf("profil    : %d\n", len(c.Profiles))
+	fmt.Printf("profiles  : %d\n", len(c.Profiles))
 	who := agentName()
 	if who == "" {
-		who = "insan (TTY: " + map[bool]string{true: "var", false: "yok"}[isTTY()] + ")"
+		who = "human (TTY: " + map[bool]string{true: "yes", false: "no"}[isTTY()] + ")"
 	}
-	fmt.Println("cagiran   : " + who)
+	fmt.Println("caller    : " + who)
 	return nil
 }
 
 func cmdAdd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("kullanim: kasa add <alan/ad> [--stdin]")
+		return fmt.Errorf("usage: kasa add <namespace/name> [--stdin]")
 	}
 	key := args[0]
 	if err := validKey(key); err != nil {
@@ -306,28 +308,28 @@ func cmdAdd(args []string) error {
 	if len(args) > 1 && args[1] == "--stdin" {
 		val, err = readAllStdin()
 	} else {
-		val, err = promptSecret("deger (gorunmez): ")
+		val, err = promptSecret("value (hidden): ")
 	}
 	if err != nil {
 		return err
 	}
 	if val == "" {
-		return fmt.Errorf("bos deger kaydedilmez")
+		return fmt.Errorf("empty values are not stored")
 	}
 	if err := kcSet(key, val); err != nil {
 		audit("FAIL", "add", key, err.Error())
 		return err
 	}
 	audit("OK", "add", key, "")
-	fmt.Println("kaydedildi: " + key)
+	fmt.Println("saved: " + key)
 	return nil
 }
 
-// eklemeKapisi: ajan yeni anahtar ekleyebilir (ornek: bir aracin urettigi token'i
-// `kasa add --stdin` ile kaydetmesi), ama VAR OLAN bir sirri degistiremez; kilitli
-// profile ait anahtarlar ise yalniz insan + TTY ile yazilir. Aksi halde ajan
-// kilitli bir aracin kullandigi sirri kendi degeriyle degistirip araci kendi
-// hesabina yonlendirebilirdi.
+// eklemeKapisi: an agent may add a new key (e.g. storing a token a tool
+// generated via `kasa add --stdin`), but cannot overwrite an EXISTING secret;
+// keys belonging to a locked profile can only be written by a human + TTY.
+// Otherwise an agent could replace a secret used by a locked tool with its own
+// value and redirect that tool to its own account.
 func eklemeKapisi(key string) error {
 	c, err := loadConfig()
 	if err != nil {
@@ -342,9 +344,9 @@ func eklemeKapisi(key string) error {
 	}
 	_, err = kcGet(key)
 	if err == nil {
-		audit("DENIED", "add", key, "ajan var olan sirri degistiremez: "+a)
-		return fmt.Errorf("reddedildi: var olan bir sir ajan oturumundan degistirilemez (%s)\n"+
-			"  degistirmek icin ayri bir Terminal'de kendin calistir: kasa add %s", a, key)
+		audit("DENIED", "add", key, "agent cannot overwrite an existing secret: "+a)
+		return fmt.Errorf("denied: an existing secret cannot be overwritten from an agent session (%s)\n"+
+			"  to change it, run this yourself in a separate Terminal: kasa add %s", a, key)
 	}
 	if errors.Is(err, errAnahtarYok) {
 		return nil
@@ -361,7 +363,7 @@ func cmdLs() error {
 		return err
 	}
 	if len(keys) == 0 {
-		fmt.Println("(bos)")
+		fmt.Println("(empty)")
 		return nil
 	}
 	for _, k := range keys {
@@ -372,7 +374,7 @@ func cmdLs() error {
 
 func cmdGet(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("kullanim: kasa get <alan/ad>")
+		return fmt.Errorf("usage: kasa get <namespace/name>")
 	}
 	if err := requireHuman("get", args[0]); err != nil {
 		return err
@@ -391,7 +393,7 @@ func cmdGet(args []string) error {
 
 func cmdRm(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("kullanim: kasa rm <alan/ad>")
+		return fmt.Errorf("usage: kasa rm <namespace/name>")
 	}
 	if err := requireHuman("rm", args[0]); err != nil {
 		return err
@@ -403,7 +405,7 @@ func cmdRm(args []string) error {
 		return err
 	}
 	audit("OK", "rm", args[0], "")
-	fmt.Println("silindi: " + args[0])
+	fmt.Println("deleted: " + args[0])
 	return nil
 }
 
@@ -416,7 +418,7 @@ func cmdRun(args []string) error {
 		}
 	}
 	if sep < 1 || sep == len(args)-1 {
-		return fmt.Errorf("kullanim: kasa run <profil> -- <komut> [arg...]")
+		return fmt.Errorf("usage: kasa run <profile> -- <cmd> [arg...]")
 	}
 	if err := requireKasa(); err != nil {
 		return err
@@ -433,42 +435,43 @@ func cmdRun(args []string) error {
 		return err
 	}
 
-	// Serbest komut calistirmaya izin yok: yalnizca profilin allow listesi.
-	// Komut tam yola cozulur; kontrol edilen yol exec edilir (izin.go).
+	// Arbitrary command execution is not allowed: only the profile's allow list.
+	// The command is resolved to a full path; the checked path is what gets
+	// exec'd (allow.go).
 	bin, err := komutCoz(cmdline[0])
 	if err != nil {
-		audit("DENIED", "run", name, "bulunamadi: "+filepath.Base(cmdline[0]))
+		audit("DENIED", "run", name, "not found: "+filepath.Base(cmdline[0]))
 		return err
 	}
 	base := filepath.Base(bin)
 	if ok, neden := izinVer(p.Allow, bin, homeDir()); !ok {
-		audit("DENIED", "run", name, "izinsiz komut: "+bin)
+		audit("DENIED", "run", name, "command not allowed: "+bin)
 		return fmt.Errorf("%s", neden)
 	}
 
 	if p.Ortam != nil {
 		if err := ortamGecerli(*p.Ortam); err != nil {
-			audit("DENIED", "run", name, "profil ortam listesi: "+err.Error())
-			return fmt.Errorf("profil %s: %w", name, err)
+			audit("DENIED", "run", name, "profile env list: "+err.Error())
+			return fmt.Errorf("profile %s: %w", name, err)
 		}
 	}
 	env, err := p.resolve()
 	if err != nil {
 		return err
 	}
-	// Cocuga yalniz beyaz listeli ortam + sabit PATH + sirlar (ortam.go).
+	// The child gets only the allow-listed environment + a fixed PATH + the secrets (env.go).
 	full, atilan := cocukOrtami(os.Environ(), p, env, homeDir())
 	if len(atilan) > 0 {
-		audit("NOTE", "run", name, "ortamdan atildi: "+strings.Join(atilan, ","))
+		audit("NOTE", "run", name, "dropped from environment: "+strings.Join(atilan, ","))
 	}
 	audit("OK", "run", name, base)
-	// exec ile yer degistir: sir bu process'in bellegi disina cikmaz.
+	// Replace the process via exec: the secret never leaves this process's memory.
 	return syscall.Exec(bin, cmdline, full)
 }
 
 func cmdMail(args []string) error {
 	if len(args) == 0 || args[0] != "send" {
-		return fmt.Errorf("kullanim: kasa mail send --profil <p> --to <adres> --konu <s> [--govde <m>|--govde-dosya <f>]")
+		return fmt.Errorf("usage: kasa mail send --profile <p> --to <address> --subject <s> [--body <m>|--body-file <f>]")
 	}
 	if err := requireKasa(); err != nil {
 		return err
@@ -486,7 +489,7 @@ func cmdMail(args []string) error {
 		body = string(b)
 	}
 	if toRaw == "" || subject == "" {
-		return fmt.Errorf("--to ve --konu zorunlu")
+		return fmt.Errorf("--to and --subject are required")
 	}
 	var to []string
 	for _, t := range strings.Split(toRaw, ",") {
@@ -507,7 +510,7 @@ func cmdMail(args []string) error {
 		return err
 	}
 	audit("OK", "mail.send", prof, strings.Join(to, ","))
-	fmt.Printf("gonderildi -> %s\n", strings.Join(to, ", "))
+	fmt.Printf("sent -> %s\n", strings.Join(to, ", "))
 	return nil
 }
 
@@ -523,7 +526,7 @@ func cmdProfile(args []string) error {
 	switch sub {
 	case "ls":
 		if len(c.Profiles) == 0 {
-			fmt.Println("(profil yok) - " + configPath())
+			fmt.Println("(no profiles) - " + configPath())
 			return nil
 		}
 		for name, p := range c.Profiles {
@@ -532,7 +535,7 @@ func cmdProfile(args []string) error {
 			for k, ref := range p.Secrets {
 				envs = append(envs, k+"="+ref)
 			}
-			fmt.Printf("             sirlar: %s\n", strings.Join(envs, " "))
+			fmt.Printf("             secrets: %s\n", strings.Join(envs, " "))
 			fmt.Printf("             allow : %s\n", strings.Join(p.Allow, " "))
 		}
 	case "path":
@@ -549,7 +552,7 @@ func cmdProfile(args []string) error {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	default:
-		return fmt.Errorf("kullanim: kasa profile [ls|edit|path]")
+		return fmt.Errorf("usage: kasa profile [ls|edit|path]")
 	}
 	return nil
 }
@@ -562,7 +565,7 @@ func cmdAudit(args []string) error {
 	}
 	b, err := os.ReadFile(auditPath())
 	if err != nil {
-		fmt.Println("(gunluk bos)")
+		fmt.Println("(log is empty)")
 		return nil
 	}
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")

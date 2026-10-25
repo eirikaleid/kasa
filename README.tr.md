@@ -130,7 +130,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa import <dosya.age> [--overwrite]` | Yedeği bu makineye geri yükle | yalnız insan + TTY |
 | `kasa version` | Sürümü yazdır | herkes |
 
-Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pass`. Türkçe komut adları (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) de geçerlidir.
+Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pass`. Eski Türkçe komut adları (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) gizli takma ad olarak hâlâ kabul edilir.
 
 ## Profiller
 
@@ -212,6 +212,16 @@ Kısaca: sırlar ayrı, otomatik kilitlenen bir keychain'de durur; ham okuma yal
 
 Tam tehdit modeli, kasa'nın neye karşı koruyup neye karşı korumadığı ve bilinen artık riskler [SECURITY.md](SECURITY.md) dosyasındadır (İngilizce).
 
+## Proje yapısı
+
+- `cmd/kasa/` - Go kaynağı (tek `main` paketi) ve testleri
+- `docs/` - ek belgeler (ajan entegrasyonu)
+- `skills/` - kasa için Claude Code skill'i
+- `contrib/` - isteğe bağlı eklentiler (launchd ajanları)
+- `assets/` - README görselleri
+
+Go modül yolu `github.com/eirikaleid/kasa`'dır; `make install` `./cmd/kasa`'yı derler.
+
 ## Derleme seçenekleri
 
 ```bash
@@ -232,7 +242,6 @@ Diğer hedefler: `make build`, `make test`, `make vet`, `make clean`.
 ## Bilinen sınırlamalar
 
 - Yalnızca macOS. kasa, Security framework'üne ve `security` keychain araçlarına dayanır.
-- CLI mesajları şu an Türkçedir; İngilizce çıktı planlanıyor.
 - Ajan guard'ı en iyi çabalıdır, güvenlik sınırı değildir ([SECURITY.md](SECURITY.md)).
 - Kilitli olmayan profiller kolaylıktır; yüksek değerli sırlar için kilitli profil kullanın.
 

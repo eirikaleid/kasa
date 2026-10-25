@@ -6,7 +6,7 @@ package main
 #include <stdlib.h>
 #include <Security/Security.h>
 
-// kasaDurumu: SecKeychainGetStatus, sifre penceresi acmaz. -1 = okunamadi.
+// kasaDurumu: SecKeychainGetStatus; never opens a password dialog. -1 = could not read.
 static int kasaDurumu(const char *yol) {
 	SecKeychainRef kc = NULL;
 	if (SecKeychainOpen(yol, &kc) != errSecSuccess || kc == NULL) return -1;
@@ -16,15 +16,16 @@ static int kasaDurumu(const char *yol) {
 	return r == errSecSuccess ? (int)s : -1;
 }
 
-// kasaPencereyleAc: macOS'un kendi kilit acma penceresini gosterir
-// (SecKeychainUnlock, usePassword=false). Parola kasa'nin bellegine hic girmez.
-// Pencere kapanana kadar bekler. 0 = acildi.
+// kasaPencereyleAc: shows macOS's own unlock dialog
+// (SecKeychainUnlock, usePassword=false). The password never enters kasa's
+// memory. Blocks until the dialog closes. 0 = unlocked.
 static int kasaPencereyleAc(const char *yol) {
 	SecKeychainRef kc = NULL;
 	OSStatus r = SecKeychainOpen(yol, &kc);
 	if (r != errSecSuccess || kc == NULL) return (int)r;
-	// Diger keychain cagrilari etkilesimi kapatir (kc_darwin.go); pencere yalniz
-	// burada, bilerek acilir ve hemen yeniden kapatilir.
+	// Other keychain calls disable interaction (keychain_darwin.go); the dialog
+	// is opened only here, deliberately, and interaction is disabled again
+	// right away.
 	SecKeychainSetUserInteractionAllowed(true);
 	r = SecKeychainUnlock(kc, 0, NULL, false);
 	SecKeychainSetUserInteractionAllowed(false);
@@ -38,10 +39,11 @@ import (
 	"unsafe"
 )
 
-// isLocked: kasa kilitli mi. Eskiden `security show-keychain-info`a bakiyordu;
-// o komut kilitliyken de 0 dondugu icin kasa hep "acik" gorunuyordu ve
-// kilitKapisi hic devreye girmiyordu (04.10.2026). Okunamazsa kilitli sayilir:
-// yanlis "kilitli" bir kosuyu atlatir, yanlis "acik" sifre penceresi acar.
+// isLocked: whether the vault is locked. It used to check
+// `security show-keychain-info`; that command returns 0 even when locked, so
+// the vault always looked "unlocked" and kilitKapisi never kicked in
+// (2026-10-04). If the state cannot be read it counts as locked: a false
+// "locked" merely skips a run, a false "unlocked" would pop a password dialog.
 func isLocked() bool {
 	yol := C.CString(keychainPath())
 	defer C.free(unsafe.Pointer(yol))
@@ -49,15 +51,15 @@ func isLocked() bool {
 	return s < 0 || s&C.kSecUnlockStateStatus == 0
 }
 
-// kcPencereyleAc: kasayi macOS sifre penceresiyle acar. Iptal de hata doner.
+// kcPencereyleAc: unlocks the vault with the macOS password dialog. Cancelling also returns an error.
 func kcPencereyleAc() error {
 	yol := C.CString(keychainPath())
 	defer C.free(unsafe.Pointer(yol))
 	if r := C.kasaPencereyleAc(yol); r != 0 {
 		if r == C.errSecUserCanceled || r == C.errSecAuthFailed {
-			return fmt.Errorf("acilmadi (iptal ya da yanlis parola, kod %d)", int(r))
+			return fmt.Errorf("not unlocked (cancelled or wrong password, code %d)", int(r))
 		}
-		return fmt.Errorf("acilmadi (kod %d)", int(r))
+		return fmt.Errorf("not unlocked (code %d)", int(r))
 	}
 	return nil
 }

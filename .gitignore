@@ -1,12 +1,12 @@
-# Derlenmis ikili
+# Compiled binary
 /kasa
 
-# Sir tasiyan dosyalar: sifreli olsalar bile hicbir yerde depoya girmez.
-# Sifreli yedek depoda cevrimdisi parola denemesine aciktir; yedekler
-# depo disindaki hedeflerde durur (kasa hedef ekle <dizin>).
+# Files that carry secrets: even when encrypted, they never go into the repo.
+# An encrypted backup in the repo is exposed to offline password guessing;
+# backups live in targets outside the repo (kasa target add <dir>).
 *.age
 
-# Yerel keychain ve durum dosyalari (normalde repo disinda yasarlar)
+# Local keychain and state files (normally live outside the repo)
 *.keychain-db
 profiles.json
 audit.log

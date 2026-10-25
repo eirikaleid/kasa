@@ -130,7 +130,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa import <file.age> [--overwrite]` | Restore a backup on this machine | human + TTY only |
 | `kasa version` | Print the version | anyone |
 
-Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pass`. The Turkish command names (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) work as well.
+Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pass`. The old Turkish command names (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) are still accepted as hidden aliases.
 
 ## Profiles
 
@@ -212,6 +212,16 @@ The human/agent guard (agent marker variables plus a TTY check) is **best effort
 
 The full threat model, what kasa does and does not protect against, and the known residual risks are in [SECURITY.md](SECURITY.md).
 
+## Project layout
+
+- `cmd/kasa/` - the Go source (single `main` package) and its tests
+- `docs/` - extra documentation (agent integration)
+- `skills/` - the Claude Code skill for kasa
+- `contrib/` - optional extras (launchd agents)
+- `assets/` - README images
+
+The Go module path is `github.com/eirikaleid/kasa`; `make install` builds `./cmd/kasa`.
+
 ## Build options
 
 ```bash
@@ -232,7 +242,6 @@ Other targets: `make build`, `make test`, `make vet`, `make clean`.
 ## Known limitations
 
 - macOS only. kasa builds on the Security framework and the `security` keychain tooling.
-- CLI messages are currently Turkish; English output is planned.
 - The agent guard is best effort, not a security boundary (see [SECURITY.md](SECURITY.md)).
 - Unlocked profiles are a convenience; use locked profiles for high-value secrets.
 

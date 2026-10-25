@@ -7,18 +7,18 @@ import (
 	"testing"
 )
 
-// Kasa kurulu degilken sir komutlari denenmemeli: hata "kasa init"e
-// yonlendirmeli, "boyle bir anahtar yok" gibi yaniltici olmamali.
+// Secret commands must not be attempted while the vault is not set up: the
+// error must point to "kasa init", not mislead like "no such key".
 func TestRequireKasaKurulmamis(t *testing.T) {
 	dir := t.TempDir()
 	kasaYoluTest(t, filepath.Join(dir, "Library", "Keychains", "kasa.keychain-db"))
 
 	err := requireKasa()
 	if err == nil {
-		t.Fatal("kasa yokken requireKasa nil dondu")
+		t.Fatal("requireKasa returned nil while the vault does not exist")
 	}
 	if !strings.Contains(err.Error(), "kasa init") {
-		t.Fatalf("hata mesaji kurulum yolunu gostermiyor: %v", err)
+		t.Fatalf("error message does not point to the setup step: %v", err)
 	}
 }
 
@@ -34,13 +34,13 @@ func TestRequireKasaKurulu(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := requireKasa(); err != nil {
-		t.Fatalf("kasa varken hata dondu: %v", err)
+		t.Fatalf("returned an error while the vault exists: %v", err)
 	}
 }
 
-// Kilitli kasada sifre penceresini yalnizca terminaldeki insan acabilir;
-// LaunchAgent (TTY yok) ve ajan oturumu acamaz, KASA_SOR=1 bilerek acar;
-// ajan ortaminda KASA_SOR=1 GECERSIZ.
+// On a locked vault only a human at a terminal can open the password dialog;
+// a LaunchAgent (no TTY) and an agent session cannot, KASA_SOR=1 deliberately
+// opens it; in an agent environment KASA_SOR=1 is INVALID.
 func TestPencereAcilabilir(t *testing.T) {
 	durumlar := []struct {
 		tty, ajan bool
@@ -58,12 +58,12 @@ func TestPencereAcilabilir(t *testing.T) {
 	}
 	for _, d := range durumlar {
 		if g := pencereAcilabilir(d.tty, d.ajan, d.sor); g != d.beklenen {
-			t.Errorf("tty=%v ajan=%v sor=%q: %v, beklenen %v", d.tty, d.ajan, d.sor, g, d.beklenen)
+			t.Errorf("tty=%v ajan=%v sor=%q: %v, expected %v", d.tty, d.ajan, d.sor, g, d.beklenen)
 		}
 	}
 }
 
-// /dev/null karakter aygiti ama terminal degil: LaunchAgent stdin'i budur.
+// /dev/null is a character device but not a terminal: it is a LaunchAgent's stdin.
 func TestIsTTYDevNull(t *testing.T) {
 	f, err := os.Open(os.DevNull)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestIsTTYDevNull(t *testing.T) {
 	os.Stdin = f
 	defer func() { os.Stdin = eski }()
 	if isTTY() {
-		t.Fatal("/dev/null terminal sayildi")
+		t.Fatal("/dev/null was treated as a terminal")
 	}
 }
 

@@ -17,37 +17,39 @@ type SMTPConf struct {
 
 type Profile struct {
 	Aciklama string            `json:"aciklama"`
-	Secrets  map[string]string `json:"secrets"` // ENV_ADI -> kasa anahtari
-	Allow    []string          `json:"allow"`   // run ile calistirilabilecek komutlar
-	// Ortam: run'da cocuga gecen ortam degiskenleri (beyaz liste; "LC_*" onek).
-	// nil (alan yok) = varsayilanOrtam (ortam.go). PATH her zaman sabit.
+	Secrets  map[string]string `json:"secrets"` // ENV_NAME -> kasa key
+	Allow    []string          `json:"allow"`   // commands that run may execute
+	// Ortam: environment variables passed to the child in run (allow list;
+	// "LC_*" is a prefix). nil (field absent) = varsayilanOrtam (env.go). PATH
+	// is always fixed.
 	Ortam *[]string `json:"ortam,omitempty"`
-	SMTP  *SMTPConf `json:"smtp,omitempty"` // mail profilleri icin
+	SMTP  *SMTPConf `json:"smtp,omitempty"` // for mail profiles
 }
 
 type Config struct {
 	Profiles map[string]Profile `json:"profiles"`
-	// Yedek hedefleri: her biri bir dizin yolu. USB, harici disk, NAS,
-	// bulut senkron dizini ya da git deposu -- kasa icin hepsi yoldur.
+	// Backup targets: each one is a directory path. USB, external disk, NAS,
+	// cloud-sync directory or git repo -- they are all just paths to kasa.
 	Hedefler []string `json:"hedefler,omitempty"`
 
-	// kullaniciAsli: kilitli dosyanin ezdigi profillerin kullanici dosyasindaki hali
-	// (saveConfig kilitli icerigi kullanici dosyasina yazmasin).
+	// kullaniciAsli: the user-file version of profiles overridden by the locked
+	// file (so saveConfig does not write locked content into the user file).
 	kullaniciAsli map[string]*Profile
-	// kilitliRef: kilitli profillerin kullandigi kasa anahtarlari; kilitli olmayan
-	// profil (ajanin yazabildigi dosya, HOME degistirilerek sahte dosya dahil) bunlara
-	// erisemez.
+	// kilitliRef: kasa keys used by locked profiles; a non-locked profile (from
+	// a file the agent can write, including a fake file made by changing HOME)
+	// cannot access them.
 	kilitliRef map[string]bool
 }
 
-// KilitliProfilYolu: root sahipli profil dosyasi.
-// ~/.config/kasa/profiles.json ajanin yazabildigi bir dosya: allow'a /bin/sh eklenip
-// sir okunabilirdi. Buradaki profiller kullanici dosyasindakileri EZER ve yalniz
-// sudo ile degisir. Dosya ve koke kadar ust dizinleri root sahipli, grup/diger
-// yazamaz olmali; degilse kasa run/profil okumasi DURUR.
+// KilitliProfilYolu: root-owned profile file.
+// ~/.config/kasa/profiles.json is a file the agent can write: it could add
+// /bin/sh to allow and read secrets. Profiles here OVERRIDE the ones in the
+// user file and change only via sudo. The file and every parent directory up to
+// the root must be root-owned and not group/other writable; otherwise kasa run
+// and profile loading STOP.
 var KilitliProfilYolu = "/usr/local/etc/kasa/profiles.json"
 
-// configPath: $HOME degil hesap kaydindaki ev dizini (kasaEvi, guard.go).
+// configPath: uses the home directory from the account record, not $HOME (kasaEvi, guard.go).
 func configPath() string {
 	p := configPathYol()
 	os.MkdirAll(filepath.Dir(p), 0o700)
@@ -56,7 +58,7 @@ func configPath() string {
 
 func configPathYol() string { return filepath.Join(kasaEvi(), ".config", "kasa", "profiles.json") }
 
-// Bu dosya sir icermez, yalnizca kasa anahtarlarina referans tutar.
+// This file contains no secrets, only references to kasa keys.
 func loadConfig() (*Config, error) {
 	c := &Config{Profiles: map[string]Profile{}}
 	b, err := os.ReadFile(configPath())
@@ -65,7 +67,7 @@ func loadConfig() (*Config, error) {
 	}
 	if err == nil {
 		if err := json.Unmarshal(b, c); err != nil {
-			return nil, fmt.Errorf("profiles.json bozuk: %w", err)
+			return nil, fmt.Errorf("profiles.json is corrupt: %w", err)
 		}
 	}
 	if c.Profiles == nil {
@@ -74,13 +76,13 @@ func loadConfig() (*Config, error) {
 	return c, kilitliUygula(c, KilitliProfilYolu)
 }
 
-// kilitliUygula: root sahipli profil dosyasi varsa profillerini c'ye yazar (ezer).
+// kilitliUygula: if a root-owned profile file exists, writes its profiles into c (overriding).
 func kilitliUygula(c *Config, yol string) error {
 	if _, err := os.Lstat(yol); os.IsNotExist(err) {
 		return nil
 	}
 	if err := rootSahipli(yol); err != nil {
-		return fmt.Errorf("kilitli profil dosyasi guvensiz: %w", err)
+		return fmt.Errorf("locked profile file is insecure: %w", err)
 	}
 	b, err := os.ReadFile(yol)
 	if err != nil {
@@ -90,13 +92,13 @@ func kilitliUygula(c *Config, yol string) error {
 		Profiles map[string]Profile `json:"profiles"`
 	}
 	if err := json.Unmarshal(b, &k); err != nil {
-		return fmt.Errorf("%s bozuk: %w", yol, err)
+		return fmt.Errorf("%s is corrupt: %w", yol, err)
 	}
 	c.kullaniciAsli = map[string]*Profile{}
 	c.kilitliRef = map[string]bool{}
 	for ad, p := range k.Profiles {
 		if err := kilitliAllowDenetle(p.Allow); err != nil {
-			return fmt.Errorf("%s: profil %s: %w", yol, ad, err)
+			return fmt.Errorf("%s: profile %s: %w", yol, ad, err)
 		}
 		for _, ref := range p.Secrets {
 			c.kilitliRef[anahtarNormal(ref)] = true
@@ -112,22 +114,22 @@ func kilitliUygula(c *Config, yol string) error {
 	return nil
 }
 
-// kilitliAllowDenetle: kilitli profilde allow yalniz MUTLAK ve temiz yol olur.
-// Ciplak ad ("python3") guvenilen dizinlerde cozulur ve o dizinler
-// kullanici-yazilabilir olabilir (~/.local/bin, TRUSTED_DIRS); "~/" kullanicinin
-// ev dizinine, "*" her seye izin verir. Root'un kilitledigi profil, ajanin
-// yazabildigi bir dizindeki ikiliye baglanmasin.
+// kilitliAllowDenetle: in a locked profile, allow entries may only be ABSOLUTE,
+// clean paths. A bare name ("python3") is resolved in trusted directories, and
+// those can be user-writable (~/.local/bin, TRUSTED_DIRS); "~/" permits the
+// user's home directory and "*" permits everything. A profile locked by root
+// must not end up bound to a binary in a directory the agent can write.
 func kilitliAllowDenetle(allow []string) error {
 	for _, a := range allow {
 		if !strings.HasPrefix(a, "/") || filepath.Clean(a) != a {
-			return fmt.Errorf("allow girdisi %q mutlak ve temiz bir yol olmali "+
-				"(kilitli profilde ciplak ad, ~ ya da * kabul edilmez)", a)
+			return fmt.Errorf("allow entry %q must be an absolute, clean path "+
+				"(bare names, ~ or * are not accepted in a locked profile)", a)
 		}
 	}
 	return nil
 }
 
-// rootSahipli: yol ve koke kadar her ust dizin symlink degil, root sahipli, g/o yazamaz.
+// rootSahipli: the path and every parent directory up to the root must be non-symlink, root-owned and not group/other writable.
 func rootSahipli(yol string) error {
 	for y := filepath.Clean(yol); ; y = filepath.Dir(y) {
 		fi, err := os.Lstat(y)
@@ -136,7 +138,7 @@ func rootSahipli(yol string) error {
 		}
 		st, ok := fi.Sys().(*syscall.Stat_t)
 		if !ok || fi.Mode()&os.ModeSymlink != 0 || st.Uid != 0 || fi.Mode().Perm()&0o022 != 0 {
-			return fmt.Errorf("%s root sahipli degil / symlink / g-o yazabilir", y)
+			return fmt.Errorf("%s is not root-owned / is a symlink / is group-or-other writable", y)
 		}
 		if y == "/" {
 			return nil
@@ -145,7 +147,7 @@ func rootSahipli(yol string) error {
 }
 
 func saveConfig(c *Config) error {
-	// Kilitli profiller kullanici dosyasina yazilmaz: oradaki asli geri konur.
+	// Locked profiles are not written to the user file: the original there is restored.
 	yaz := *c
 	yaz.Profiles = map[string]Profile{}
 	for ad, p := range c.Profiles {
@@ -168,24 +170,24 @@ func saveConfig(c *Config) error {
 func (c *Config) get(name string) (Profile, error) {
 	p, ok := c.Profiles[name]
 	if !ok {
-		return Profile{}, fmt.Errorf("profil yok: %s (bak: kasa profile ls)", name)
+		return Profile{}, fmt.Errorf("no such profile: %s (see: kasa profile ls)", name)
 	}
 	if _, kilitli := c.kullaniciAsli[name]; !kilitli {
 		for env, ref := range p.Secrets {
 			if c.kilitliRef[anahtarNormal(ref)] {
-				return Profile{}, fmt.Errorf("profil %s: %s (%s) kilitli profile ait; yalniz %s'teki profil kullanabilir", name, env, ref, KilitliProfilYolu)
+				return Profile{}, fmt.Errorf("profile %s: %s (%s) belongs to a locked profile; only the profile in %s may use it", name, env, ref, KilitliProfilYolu)
 			}
 		}
 	}
 	return p, nil
 }
 
-// anahtarNormal: kilitli anahtar karsilastirmasi icin. Keychain aramasi bayt
-// bayt (buyuk/kucuk harf duyarli) olsa da karsilastirma duyarsiz tutulur:
-// "Gizli/Ref" gibi bir yazimla kilitli anahtarin etrafindan dolasilamasin.
+// anahtarNormal: for comparing locked keys. Even though the keychain lookup is
+// byte-for-byte (case-sensitive), this comparison is case-insensitive so a
+// spelling like "Secret/Ref" cannot be used to get around a locked key.
 func anahtarNormal(k string) string { return strings.ToLower(strings.TrimSpace(k)) }
 
-// resolve: profilin env haritasini kasadan doldurur.
+// resolve: fills the profile's env map from the vault.
 func (p Profile) resolve() (map[string]string, error) {
 	env := map[string]string{}
 	for k, ref := range p.Secrets {

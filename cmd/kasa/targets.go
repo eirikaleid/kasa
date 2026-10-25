@@ -1,9 +1,9 @@
 package main
 
-// Yedek hedefleri. Bir hedef sadece bir dizin yoludur: harici disk, USB,
-// NAS mount'u, iCloud/Dropbox senkron dizini ya da git deposunun yedek/
-// klasoru. Boylece "baska bir yere tasi" istegi tek bir soyutlamaya iner
-// ve yeni bir bulut saglayicisi icin kod yazmak gerekmez.
+// Backup targets. A target is just a directory path: an external disk, USB
+// stick, NAS mount, iCloud/Dropbox sync folder, or the backup/ folder of a
+// git repository. This reduces "store it somewhere else" to a single
+// abstraction, so no new code is needed for each cloud provider.
 
 import (
 	"fmt"
@@ -14,11 +14,13 @@ import (
 	"time"
 )
 
-// Yedegi eski sayacagimiz esik: bundan eski hedef "bayat" isaretlenir.
+// Age threshold in days: a target whose newest backup is older than this
+// is flagged as stale.
 const bayatGun = 30
 
-// expandHome: "~" hesap kaydindaki ev dizinine (kasaEvi) acilir, $HOME'a degil:
-// ajan HOME'u degistirip "~/..." hedefli yedegi kendi dizinine yonlendiremesin.
+// expandHome: "~" expands to the home directory from the account record
+// (kasaEvi), not to $HOME, so an agent cannot change HOME and redirect a
+// backup aimed at "~/..." into a directory of its own.
 func expandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
 		return filepath.Join(kasaEvi(), strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
@@ -26,7 +28,7 @@ func expandHome(p string) string {
 	return p
 }
 
-// hedefler: yapilandirilmis hedefleri mutlak yol olarak dondurur.
+// hedefler: returns the configured targets as absolute paths.
 func hedefler(c *Config) []string {
 	var out []string
 	for _, h := range c.Hedefler {
@@ -55,25 +57,25 @@ func cmdHedef(args []string) error {
 	case "ls", "list":
 		hs := hedefler(c)
 		if len(hs) == 0 {
-			fmt.Println("(hedef yok)")
-			fmt.Println("ekle: kasa hedef ekle /Volumes/Yedek/kasa")
-			fmt.Println("      kasa hedef ekle /Volumes/USB/kasa")
+			fmt.Println("(no targets)")
+			fmt.Println("add: kasa target add /Volumes/Backup/kasa")
+			fmt.Println("     kasa target add /Volumes/USB/kasa")
 			return nil
 		}
 		for _, h := range hs {
-			durum := "hazir"
+			durum := "ready"
 			if fi, err := os.Stat(h); err != nil {
-				durum = "ERISILEMEZ (takili degil?)"
+				durum = "UNREACHABLE (not mounted?)"
 			} else if !fi.IsDir() {
-				durum = "HATA: dizin degil"
+				durum = "ERROR: not a directory"
 			}
 			fmt.Printf("%-50s %s\n", h, durum)
 		}
 		return nil
 
-	case "ekle", "add":
+	case "add", "ekle": // "ekle": hidden legacy alias
 		if len(args) < 2 {
-			return fmt.Errorf("kullanim: kasa hedef ekle <dizin>")
+			return fmt.Errorf("usage: kasa target add <dir>")
 		}
 		yol, err := filepath.Abs(expandHome(args[1]))
 		if err != nil {
@@ -81,23 +83,23 @@ func cmdHedef(args []string) error {
 		}
 		for _, h := range hedefler(c) {
 			if h == yol {
-				return fmt.Errorf("hedef zaten ekli: %s", yol)
+				return fmt.Errorf("target already added: %s", yol)
 			}
 		}
 		if err := os.MkdirAll(yol, 0o700); err != nil {
-			return fmt.Errorf("dizin olusturulamadi: %w", err)
+			return fmt.Errorf("could not create directory: %w", err)
 		}
 		c.Hedefler = append(c.Hedefler, yol)
 		if err := saveConfig(c); err != nil {
 			return err
 		}
 		audit("OK", "hedef.ekle", yol, "")
-		fmt.Println("eklendi: " + yol)
+		fmt.Println("added: " + yol)
 		return nil
 
-	case "sil", "rm", "remove":
+	case "rm", "remove", "sil": // "sil": hidden legacy alias
 		if len(args) < 2 {
-			return fmt.Errorf("kullanim: kasa hedef sil <dizin>")
+			return fmt.Errorf("usage: kasa target rm <dir>")
 		}
 		yol, _ := filepath.Abs(expandHome(args[1]))
 		var kalan []string
@@ -110,19 +112,19 @@ func cmdHedef(args []string) error {
 			kalan = append(kalan, h)
 		}
 		if !bulundu {
-			return fmt.Errorf("boyle bir hedef yok: %s (bak: kasa hedef ls)", yol)
+			return fmt.Errorf("no such target: %s (see: kasa target ls)", yol)
 		}
 		c.Hedefler = kalan
 		if err := saveConfig(c); err != nil {
 			return err
 		}
 		audit("OK", "hedef.sil", yol, "")
-		// Hedef listeden cikar; oradaki yedek dosyalari silinmez.
-		fmt.Println("cikarildi: " + yol + " (oradaki yedekler silinmedi)")
+		// The target is only removed from the list; backup files there are not deleted.
+		fmt.Println("removed: " + yol + " (backups there were not deleted)")
 		return nil
 
 	default:
-		return fmt.Errorf("kullanim: kasa hedef [ls|ekle <dizin>|sil <dizin>]")
+		return fmt.Errorf("usage: kasa target [ls|add <dir>|rm <dir>]")
 	}
 }
 
@@ -132,7 +134,7 @@ type yedekKaydi struct {
 	zaman time.Time
 }
 
-// yedekleriTara: bir dizindeki kasa yedeklerini bulur.
+// yedekleriTara: finds the kasa backups in a directory.
 func yedekleriTara(dir string) ([]yedekKaydi, error) {
 	girdiler, err := os.ReadDir(dir)
 	if err != nil {
@@ -153,15 +155,15 @@ func yedekleriTara(dir string) ([]yedekKaydi, error) {
 	return out, nil
 }
 
-// cmdYedek ls: her hedefte hangi yedek var, ne kadar eski. Amac "yedek
-// aldigimi saniyordum" durumunu gormek.
+// cmdYedek ls: which backups each target holds and how old they are. The aim
+// is to catch the "I thought I had a backup" situation.
 func cmdYedek(args []string) error {
 	sub := "ls"
 	if len(args) > 0 {
 		sub = args[0]
 	}
 	if sub != "ls" && sub != "list" {
-		return fmt.Errorf("kullanim: kasa yedek ls")
+		return fmt.Errorf("usage: kasa backup ls")
 	}
 	c, err := loadConfig()
 	if err != nil {
@@ -169,7 +171,7 @@ func cmdYedek(args []string) error {
 	}
 	hs := hedefler(c)
 	if len(hs) == 0 {
-		fmt.Println("(hedef yok) - kasa hedef ekle <dizin>")
+		fmt.Println("(no targets) - kasa target add <dir>")
 		return nil
 	}
 	uyari := 0
@@ -177,12 +179,12 @@ func cmdYedek(args []string) error {
 		fmt.Println(h)
 		kayitlar, err := yedekleriTara(h)
 		if err != nil {
-			fmt.Println("  ERISILEMEZ (takili degil?)")
+			fmt.Println("  UNREACHABLE (not mounted?)")
 			uyari++
 			continue
 		}
 		if len(kayitlar) == 0 {
-			fmt.Println("  (yedek yok)  <-- bu hedef bos")
+			fmt.Println("  (no backups)  <-- this target is empty")
 			uyari++
 			continue
 		}
@@ -190,7 +192,7 @@ func cmdYedek(args []string) error {
 			gun := int(time.Since(k.zaman).Hours() / 24)
 			not := ""
 			if i == 0 && gun > bayatGun {
-				not = fmt.Sprintf("  <-- %d gunluk, bayat", gun)
+				not = fmt.Sprintf("  <-- %d days old, stale", gun)
 				uyari++
 			}
 			fmt.Printf("  %-34s %6.1f KB  %s%s\n",
@@ -199,7 +201,7 @@ func cmdYedek(args []string) error {
 		}
 	}
 	if uyari > 0 {
-		fmt.Printf("\n%d hedef dikkat istiyor. tazele: kasa export\n", uyari)
+		fmt.Printf("\n%d target(s) need attention. refresh: kasa export\n", uyari)
 	}
 	return nil
 }

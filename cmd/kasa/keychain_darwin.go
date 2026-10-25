@@ -1,26 +1,28 @@
 package main
 
-// Keychain'e Security.framework ile dogrudan erisim (cgo).
+// Direct keychain access through Security.framework (cgo).
 //
-// Eskiden sirlar ve parolalar `security ... -w <deger>` / `-p <parola>` ile
-// alt surecin ARGV'sine giriyordu; ayni kullanicinin her sureci `ps` ile
-// argv'yi okuyabilir. Artik parola ve sir degeri hicbir alt surecin argv'sine
-// girmez: olusturma, acma, yazma, okuma ve silme bu dosyadaki C fonksiyonlariyla
-// yapilir. Sir icermeyen ayar/liste komutlari (list-keychains,
-// set-keychain-settings, dump-keychain, lock-keychain) security CLI'da kalir.
+// Secrets and passwords used to go into a child process's ARGV via
+// `security ... -w <value>` / `-p <password>`; any process of the same user
+// can read argv with `ps`. Now neither the password nor the secret value ever
+// enters any subprocess's argv: create, unlock, write, read and delete are done
+// with the C functions in this file. Settings/list commands that carry no
+// secret (list-keychains, set-keychain-settings, dump-keychain, lock-keychain)
+// stay on the security CLI.
 //
-// Kullanilan SecKeychain* API'leri deprecated; ama dosya tabanli (login disi,
-// ayri kilitlenebilen) bir keychain icin dogru araclar bunlar. Modern
-// SecItem* API'si dosya tabanli keychain secimini artik desteklemiyor.
+// The SecKeychain* APIs used here are deprecated, but they are the right tools
+// for a file-based keychain (not the login keychain, separately lockable). The
+// modern SecItem* API no longer supports choosing a file-based keychain.
 //
-// Etkilesim (sifre penceresi, "erisime izin ver" sorusu) her cagrida KAPALI
-// (SecKeychainSetUserInteractionAllowed(false)). Pencere yalniz kcPencereyleAc
-// ile, bilerek acilir (kilit_darwin.go).
+// Interaction (password dialog, "allow access" prompt) is DISABLED on every
+// call (SecKeychainSetUserInteractionAllowed(false)). The dialog is opened only
+// by kcPencereyleAc, deliberately (lock_darwin.go).
 //
-// ACL: ogeler, `security add-generic-password` ile yazilmis eski ogelerle ayni
-// erisim listesiyle yazilir: guvenilen uygulama /usr/bin/security. Boylece
-// eski ve yeni ogeler ayni sekilde okunur ve kasa yeniden derlendiginde
-// (imza/cdhash degisir) keychain "kasa bu ogeye erismek istiyor" diye sormaz.
+// ACL: items are written with the same access list as old items written by
+// `security add-generic-password`: the trusted application is /usr/bin/security.
+// This way old and new items are read the same way, and when kasa is rebuilt
+// (signature/cdhash changes) the keychain does not ask "kasa wants to access
+// this item".
 
 /*
 #cgo LDFLAGS: -framework Security -framework CoreFoundation
@@ -30,7 +32,7 @@ package main
 #include <limits.h>
 #include <Security/Security.h>
 
-// sifirla: derleyicinin "olu yazma" diye silemeyecegi sifirlama.
+// sifirla: zeroing that the compiler cannot optimize away as a "dead store".
 static void sifirla(void *p, size_t n) {
 	volatile unsigned char *v = (volatile unsigned char *)p;
 	if (v == NULL) return;
@@ -54,9 +56,9 @@ static int ayniKeychain(SecKeychainRef a, SecKeychainRef b) {
 	return strcmp(pa, pb) == 0;
 }
 
-// listedenCikar: SecKeychainCreate yeni keychain'i kullanicinin arama
-// listesine ekler; kasa listede durmamali (keychain.go kcRemoveFromSearchList).
-// Yalniz o keychain cikarilir, listenin geri kalanina dokunulmaz.
+// listedenCikar: SecKeychainCreate adds the new keychain to the user's search
+// list; the vault must not stay on it (keychain.go kcRemoveFromSearchList).
+// Only that keychain is removed; the rest of the list is left untouched.
 static OSStatus listedenCikar(SecKeychainRef hedef) {
 	CFArrayRef liste = NULL;
 	OSStatus r = SecKeychainCopyDomainSearchList(kSecPreferencesDomainUser, &liste);
@@ -102,7 +104,7 @@ static OSStatus kasaKilitleC(const char *yol) {
 	return r;
 }
 
-// kasaOkuC: degeri *veri'ye koyar; cagiran kasaSerbestC ile sifirlayip birakir.
+// kasaOkuC: puts the value in *veri; the caller zeroes and releases it with kasaSerbestC.
 static OSStatus kasaOkuC(const char *yol, const char *svc, const char *acct, void **veri, UInt32 *n) {
 	SecKeychainRef kc = NULL;
 	*veri = NULL;
@@ -120,8 +122,8 @@ static void kasaSerbestC(void *veri, UInt32 n) {
 	SecKeychainItemFreeContent(NULL, veri);
 }
 
-// guvenilenErisim: `security add-generic-password` (-T verilmeden) ile ayni ACL:
-// yalniz /usr/bin/security sormadan okuyabilir.
+// guvenilenErisim: same ACL as `security add-generic-password` (without -T):
+// only /usr/bin/security can read without a prompt.
 static OSStatus guvenilenErisim(const char *etiket, SecAccessRef *erisim) {
 	SecTrustedApplicationRef app = NULL;
 	OSStatus r = SecTrustedApplicationCreateFromPath("/usr/bin/security", &app);
@@ -136,7 +138,7 @@ static OSStatus guvenilenErisim(const char *etiket, SecAccessRef *erisim) {
 	return r;
 }
 
-// kasaYazC: varsa degeri degistirir, yoksa olusturur.
+// kasaYazC: updates the value if the item exists, creates it otherwise.
 static OSStatus kasaYazC(const char *yol, const char *svc, const char *acct,
 		const void *veri, UInt32 n, const char *tur, const char *aciklama) {
 	SecKeychainRef kc = NULL;
@@ -189,7 +191,7 @@ static OSStatus kasaSilC(const char *yol, const char *svc, const char *acct) {
 	return r;
 }
 
-// kasaSilinC: yalniz testler icin: keychain'i diskten ve listelerden siler.
+// kasaSilinC: for tests only: deletes the keychain from disk and from the lists.
 static OSStatus kasaSilinC(const char *yol) {
 	SecKeychainRef kc = NULL;
 	OSStatus r = kcAc(yol, &kc);
@@ -216,9 +218,9 @@ const (
 	osDuplicateKeychain  = -25296 // errSecDuplicateKeychain
 )
 
-var errAnahtarYok = errors.New("boyle bir anahtar yok")
+var errAnahtarYok = errors.New("no such key")
 
-// osHata: OSStatus'u kasa'nin eski (security CLI donemi) hata metinlerine cevirir.
+// osHata: maps an OSStatus to kasa's earlier (security CLI era) error messages.
 func osHata(r C.OSStatus) error {
 	switch int(r) {
 	case 0:
@@ -226,20 +228,20 @@ func osHata(r C.OSStatus) error {
 	case osItemNotFound:
 		return errAnahtarYok
 	case osInteractionBlocked:
-		return fmt.Errorf("kasa kilitli. ac: kasa unlock")
+		return fmt.Errorf("vault is locked. unlock: kasa unlock")
 	case osAuthFailed:
-		return fmt.Errorf("parola yanlis ya da erisim reddedildi (kod %d)", int(r))
+		return fmt.Errorf("wrong password or access denied (code %d)", int(r))
 	case osNoSuchKeychain:
-		return fmt.Errorf("kasa dosyasi yok (kod %d). once: kasa init", int(r))
+		return fmt.Errorf("vault file does not exist (code %d). first run: kasa init", int(r))
 	case osDuplicateKeychain:
-		return fmt.Errorf("kasa zaten var (kod %d)", int(r))
+		return fmt.Errorf("vault already exists (code %d)", int(r))
 	}
-	return fmt.Errorf("keychain hatasi (OSStatus %d)", int(r))
+	return fmt.Errorf("keychain error (OSStatus %d)", int(r))
 }
 
-// cTampon: Go baytlarini C bellegine kopyalar; birak() sifirlayip serbest birakir.
-// Go tarafindaki string kopyalari sifirlanamaz (Go string'i degismez); bu en
-// iyi caba: en azindan C/framework tamponlari bellekte kalmaz.
+// cTampon: copies Go bytes into C memory; birak() zeroes and frees it.
+// String copies on the Go side cannot be zeroed (Go strings are immutable);
+// this is best effort: at least the C/framework buffers do not linger in memory.
 type cTampon struct {
 	p unsafe.Pointer
 	n C.UInt32
@@ -322,7 +324,7 @@ func kcSilYol(yol, svc, acct string) error {
 	return osHata(C.kasaSilC(cy, cs, ca))
 }
 
-// kcKeychainSilYol: yalniz testler kullanir (gecici keychain temizligi).
+// kcKeychainSilYol: used by tests only (temporary keychain cleanup).
 func kcKeychainSilYol(yol string) error {
 	cy := C.CString(yol)
 	defer C.free(unsafe.Pointer(cy))

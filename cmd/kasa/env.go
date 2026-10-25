@@ -6,30 +6,37 @@ import (
 	"strings"
 )
 
-// run'in cocuga verdigi ortam.
+// The environment run hands to the child.
 //
-// Cagiranin TUM ortamini aktarmak tehlikeli: ajan
-// `DYLD_INSERT_LIBRARIES=/tmp/x.dylib kasa run <p> -- <izinli ikili>` ile izinli
-// ikilinin icine kendi kodunu yukleyip sirri okuyabilirdi. Bu yuzden HER ZAMAN beyaz liste:
+// Passing the caller's ENTIRE environment is dangerous: an agent could run
+// `DYLD_INSERT_LIBRARIES=/tmp/x.dylib kasa run <p> -- <allowed binary>` to
+// load its own code into the allowed binary and read the secret. So it is
+// ALWAYS an allowlist:
 //
-//   - profilde "ortam" varsa o liste, yoksa varsayilanOrtam. Girdi tam ad ya da "ONEK*".
-//   - PATH cagirandan ALINMAZ: her zaman guvenliPath (izinli aracin alt sureclerini
-//     sahte PATH ile ele gecirmesin). Profil listesinde PATH olamaz.
-//   - Enjeksiyon degiskenleri (enjeksiyonMu) listede olsa bile gecmez; profil reddedilir.
-//   - Ajan isaretleri (agentMarkers) her zaman gecer: cocuktaki ajan kapilari kor olmasin.
-//   - Sirla ayni adli cagiran degiskeni atilir (once gelen kazanirdi: sirri golgelerdi).
+//   - If the profile has an "ortam" (environment) field, that list is used;
+//     otherwise varsayilanOrtam. An entry is an exact name or "PREFIX*".
+//   - PATH is NOT taken from the caller: it is always guvenliPath (so the
+//     allowed tool's subprocesses cannot be hijacked via a fake PATH). PATH
+//     cannot appear in a profile list.
+//   - Injection variables (enjeksiyonMu) are blocked even if listed; the
+//     profile is rejected.
+//   - Agent markers (agentMarkers) always pass through, so the agent gates
+//     in the child are not blinded.
+//   - A caller variable with the same name as a secret is dropped (the first
+//     one would win: it would shadow the secret).
 //
-// Bilinen artik risk (README "run ortami"): sir cocugun ORTAMINDA durur; macOS'ta
-// ayni kullanici sureci KERN_PROCARGS2 (`ps -E`) ile ilk ortam blogunu okuyabilir —
-// cocuk os.Unsetenv yapsa bile (test: TestPsEIlkOrtamiGosterir).
+// Known residual risk (README "run environment"): the secret lives in the
+// child's ENVIRONMENT; on macOS a same-user process can read the initial
+// environment block via KERN_PROCARGS2 (`ps -E`) even if the child calls
+// os.Unsetenv (test: TestPsEIlkOrtamiGosterir).
 
-// varsayilanOrtam: "ortam" alani olmayan profillerde cocuga gecen adlar.
+// varsayilanOrtam: names passed to the child for profiles without an "ortam" field.
 var varsayilanOrtam = []string{
 	"HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "COLORTERM", "NO_COLOR", "TZ",
 	"LANG", "LC_*", "__CF_USER_TEXT_ENCODING", "SSH_AUTH_SOCK",
 }
 
-// guvenliPath: cocuga verilen sabit PATH (izin.go'daki guvenilen dizinlerle uyumlu).
+// guvenliPath: the fixed PATH given to the child (consistent with the trusted directories in allow.go).
 func guvenliPath(home string) string {
 	d := []string{}
 	if home != "" {
@@ -40,8 +47,8 @@ func guvenliPath(home string) string {
 	return strings.Join(d, ":")
 }
 
-// enjeksiyonOnekleri / enjeksiyonAdlari: yukleyici, kabuk, yorumlayici ve arac
-// davranisini kod calistiracak sekilde degistiren degiskenler. Hicbiri gecmez.
+// enjeksiyonOnekleri / enjeksiyonAdlari: variables that change the behavior
+// of the loader, shell, interpreters and tools so that they run code. None pass.
 var enjeksiyonOnekleri = []string{
 	"DYLD_", "LD_", "BASH_FUNC_", "PYTHON", "NODE_", "PERL5", "PERLLIB", "RUBY", "GIT_", "SSH_ASKPASS",
 	"JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "NPM_CONFIG_", "UV_", "PIP_",
@@ -67,7 +74,7 @@ func enjeksiyonMu(ad string) bool {
 	return false
 }
 
-// beyazListedeMi: girdi tam ad ya da "ONEK*".
+// beyazListedeMi: an entry is an exact name or "PREFIX*".
 func beyazListedeMi(ad string, liste []string) bool {
 	for _, g := range liste {
 		if g == ad || (strings.HasSuffix(g, "*") && len(g) > 1 && strings.HasPrefix(ad, strings.TrimSuffix(g, "*"))) {
@@ -77,26 +84,26 @@ func beyazListedeMi(ad string, liste []string) bool {
 	return false
 }
 
-// ortamGecerli: profil beyaz listesindeki girdiler gecerli mi (PATH, enjeksiyon
-// adi/oneki ya da bos/joker-yalniz girdi yok).
+// ortamGecerli: are the entries in the profile allowlist valid (no PATH, no
+// injection name/prefix, and no empty or wildcard-only entry).
 func ortamGecerli(liste []string) error {
 	for _, g := range liste {
 		ad := strings.TrimSuffix(g, "*")
 		if ad == "" || strings.ContainsAny(ad, "=* ") {
-			return fmt.Errorf("ortam girdisi gecersiz: %q", g)
+			return fmt.Errorf("invalid environment entry: %q", g)
 		}
 		if enjeksiyonMu(ad) {
-			return fmt.Errorf("ortam girdisi enjeksiyon degiskeni: %q (gecirilmez)", g)
+			return fmt.Errorf("environment entry is an injection variable: %q (never passed)", g)
 		}
 		if strings.HasSuffix(g, "*") {
 			for _, o := range enjeksiyonOnekleri {
 				if strings.HasPrefix(o, ad) {
-					return fmt.Errorf("ortam girdisi enjeksiyon onekini kapsiyor: %q", g)
+					return fmt.Errorf("environment entry covers an injection prefix: %q", g)
 				}
 			}
 			for k := range enjeksiyonAdlari {
 				if strings.HasPrefix(k, ad) {
-					return fmt.Errorf("ortam girdisi enjeksiyon adini kapsiyor: %q", g)
+					return fmt.Errorf("environment entry covers an injection name: %q", g)
 				}
 			}
 		}
@@ -109,9 +116,10 @@ func ajanIsaretiMi(ad string) bool {
 	return ok
 }
 
-// cocukOrtami: cagiranin ortami (os.Environ bicimi) + profil → cocuga gidecek ortam.
-// Atilan adlar (deger degil) ikinci donuste; audit'e yazilir (beyaz liste disi
-// siradan adlar sessizce gecmez, audit'i sisirmez).
+// cocukOrtami: caller's environment (os.Environ format) + profile -> the
+// environment that goes to the child. Dropped names (not values) come back as
+// the second return value and are written to the audit log (ordinary names
+// outside the allowlist are silently not passed and do not bloat the audit).
 func cocukOrtami(cagiran []string, p Profile, sirlar map[string]string, home string) (env []string, atilan []string) {
 	liste := varsayilanOrtam
 	if p.Ortam != nil {

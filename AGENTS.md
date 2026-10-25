@@ -35,8 +35,6 @@ kasa mail send --profile mail --to someone@example.com --subject "Report" --body
 
 ## If something fails
 
-- `kasa: ... locked` / exit 75: ask the human to unlock.
+- `error: vault is locked` / exit 75: ask the human to unlock.
 - "not in this profile's allow list": the command is not permitted for that profile; report it.
-- "profile not found": run `kasa profile ls` and pick an existing profile or ask the human.
-
-Note: kasa's messages are currently printed in Turkish.
+- "no such profile": run `kasa profile ls` and pick an existing profile or ask the human.

@@ -37,6 +37,4 @@ kasa mail send --profile mail --to someone@example.com --subject "Report" --body
 
 - Exit 75 or a "locked" message: ask the human to unlock.
 - "not in this profile's allow list": the command is not permitted for that profile. Tell the user; do not look for a workaround.
-- "profile not found": check `kasa profile ls`.
-
-kasa's messages are currently printed in Turkish.
+- "no such profile": check `kasa profile ls`.

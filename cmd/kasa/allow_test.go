@@ -17,8 +17,8 @@ func calistirilabilir(t *testing.T, p string) string {
 	return p
 }
 
-// macOS'ta TempDir /var altinda, /var da /private/var'a symlink; gercek ev
-// dizini gibi kanonik yol kullan.
+// On macOS TempDir lives under /var, and /var is a symlink to /private/var;
+// use the canonical path, like a real home directory.
 func kanonikTemp(t *testing.T) string {
 	t.Helper()
 	d, err := filepath.EvalSymlinks(t.TempDir())
@@ -69,31 +69,31 @@ func TestIzinVer(t *testing.T) {
 		bin   string
 		izin  bool
 	}{
-		{"dotfiles/bin ciplak ad", []string{"deploy"}, dotbin, true},
-		{"sistem python3", []string{"python3"}, "/usr/bin/python3", true},
+		{"dotfiles/bin bare name", []string{"deploy"}, dotbin, true},
+		{"system python3", []string{"python3"}, "/usr/bin/python3", true},
 		{"homebrew", []string{"node"}, "/opt/homebrew/bin/node", true},
-		{"proje venv", []string{"python3"}, venv, true},
+		{"project venv", []string{"python3"}, venv, true},
 		{"~/.local/bin symlink", []string{"mytool"}, localbin, true},
-		{"pipx cozulmus yol", []string{"mytool"}, pipx, true},
-		{"mutlak girdi symlink ile", []string{"~/.local/bin/mytool"}, localbin, true},
-		{"mutlak girdi cozulmus yolla", []string{"~/.local/bin/mytool"}, pipx, true},
-		{"yildiz", []string{"*"}, sahte, true},
-		{"~/.local/bin -> ~/Developer (arac)", []string{"arac"}, tgLink, true},
+		{"pipx resolved path", []string{"mytool"}, pipx, true},
+		{"absolute entry via symlink", []string{"~/.local/bin/mytool"}, localbin, true},
+		{"absolute entry via resolved path", []string{"~/.local/bin/mytool"}, pipx, true},
+		{"wildcard", []string{"*"}, sahte, true},
+		{"~/.local/bin -> ~/Developer (tool)", []string{"arac"}, tgLink, true},
 
-		{"Desktop'ta ayni ad", []string{"deploy"}, sahte, false},
-		{"tmp'de ayni ad (PATH kacirma)", []string{"deploy"}, tmpSahte, false},
-		{"Developer'da venv disi", []string{"deploy"}, devSahte, false},
-		{"Developer'da sahte bin/python3", []string{"python3"}, sahteVenv, false},
-		{"listede yok", []string{"python3"}, dotbin, false},
-		{"mutlak girdi baska dosya", []string{"~/dotfiles/bin/deploy"}, sahte, false},
-		{"guvenilen dizinde /tmp'ye symlink", []string{"deploy"}, kacisLink, false},
-		{".venv/bin dizini /tmp'ye symlink", []string{"python3"}, venvKacis, false},
-		{"olmayan dosya", []string{"deploy"}, filepath.Join(home, "dotfiles", "bin", "yok"), false},
+		{"same name on Desktop", []string{"deploy"}, sahte, false},
+		{"same name in tmp (PATH hijack)", []string{"deploy"}, tmpSahte, false},
+		{"non-venv under Developer", []string{"deploy"}, devSahte, false},
+		{"fake bin/python3 under Developer", []string{"python3"}, sahteVenv, false},
+		{"not in list", []string{"python3"}, dotbin, false},
+		{"absolute entry, different file", []string{"~/dotfiles/bin/deploy"}, sahte, false},
+		{"symlink in trusted dir pointing to /tmp", []string{"deploy"}, kacisLink, false},
+		{".venv/bin directory symlinked to /tmp", []string{"python3"}, venvKacis, false},
+		{"nonexistent file", []string{"deploy"}, filepath.Join(home, "dotfiles", "bin", "yok"), false},
 	}
 	for _, d := range durumlar {
 		ok, neden := izinVer(d.allow, d.bin, home)
 		if ok != d.izin {
-			t.Errorf("%s: izin=%v beklenen %v (%s)", d.ad, ok, d.izin, neden)
+			t.Errorf("%s: allowed=%v, expected %v (%s)", d.ad, ok, d.izin, neden)
 		}
 	}
 }
@@ -109,17 +109,17 @@ func TestKomutCozGoreliYol(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !filepath.IsAbs(bin) {
-		t.Fatalf("mutlak yol bekleniyordu: %s", bin)
+		t.Fatalf("expected an absolute path: %s", bin)
 	}
 	if ok, _ := izinVer([]string{"deploy"}, bin, t.TempDir()); ok {
-		t.Fatal("cwd'deki ayni adli dosya izin almamali")
+		t.Fatal("a same-named file in cwd must not be allowed")
 	}
 	if ok, _ := izinVer([]string{"deploy"}, bin, ""); ok {
-		t.Fatal("cwd'deki ayni adli dosya izin almamali")
+		t.Fatal("a same-named file in cwd must not be allowed")
 	}
 }
 
-// Yaygin araclar kirilmasin (makineye bagli; yol yoksa atlanir).
+// Common tools must not break (machine-dependent; skipped if the path is missing).
 func TestGercekKullanimlar(t *testing.T) {
 	home := homeDir()
 	durumlar := []struct{ allow, arg0 string }{
@@ -134,11 +134,11 @@ func TestGercekKullanimlar(t *testing.T) {
 	for _, d := range durumlar {
 		bin, err := komutCoz(d.arg0)
 		if err != nil {
-			t.Logf("atlandi (bu makinede yok): %s", d.arg0)
+			t.Logf("skipped (not on this machine): %s", d.arg0)
 			continue
 		}
 		if ok, neden := izinVer([]string{d.allow}, bin, home); !ok {
-			t.Errorf("%s -> %s reddedildi: %s", d.arg0, bin, neden)
+			t.Errorf("%s -> %s was rejected: %s", d.arg0, bin, neden)
 		}
 	}
 }
@@ -147,6 +147,6 @@ func TestHomeDirHOMEdenBagimsiz(t *testing.T) {
 	gercek := homeDir()
 	t.Setenv("HOME", t.TempDir())
 	if homeDir() != gercek || gercek == "" {
-		t.Fatalf("homeDir HOME'a uydu: %q -> %q", gercek, homeDir())
+		t.Fatalf("homeDir followed HOME: %q -> %q", gercek, homeDir())
 	}
 }

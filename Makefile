@@ -15,7 +15,7 @@ LDFLAGS      := -s -w -X 'main.trustedDirsFlag=$(TRUSTED_DIRS)' -X 'main.devRoot
 .PHONY: build install test vet clean
 
 build:
-	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS)" -o kasa .
+	CGO_ENABLED=1 go build -trimpath -ldflags "$(LDFLAGS)" -o kasa ./cmd/kasa
 	# hardened runtime: dyld ignores DYLD_* variables for kasa itself
 	codesign -f -s - -o runtime kasa
 

@@ -12,9 +12,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ps -E suphesi: cocuk os.Unsetenv yapsa bile cekirdekteki ilk
-// ortam blogu ayni kullanici tarafindan KERN_PROCARGS2 (ps -E'nin kaynagi) ile
-// okunur. Bu test artik riski BELGELER: gecerse risk vardir (README "run ortami").
+// ps -E suspicion: even if the child calls os.Unsetenv, the initial
+// environment block in the kernel can be read by the same user via
+// KERN_PROCARGS2 (the source of ps -E). This test now DOCUMENTS the risk: if it
+// passes, the risk exists (README "run environment").
 func TestPsEIlkOrtamiGosterir(t *testing.T) {
 	if os.Getenv("KASA_PSE_YARDIMCI") == "1" {
 		os.Unsetenv("KASA_PSE_DENEME")
@@ -28,12 +29,12 @@ func TestPsEIlkOrtamiGosterir(t *testing.T) {
 	}
 	defer c.Wait()
 	defer c.Process.Kill()
-	time.Sleep(700 * time.Millisecond) // yardimci Unsetenv'i yapmis olsun
+	time.Sleep(700 * time.Millisecond) // let the helper finish its Unsetenv
 	ham, err := unix.SysctlRaw("kern.procargs2", c.Process.Pid)
 	if err != nil {
-		t.Skipf("kern.procargs2 okunamadi (sandbox?): %v", err)
+		t.Skipf("could not read kern.procargs2 (sandbox?): %v", err)
 	}
 	if !strings.Contains(string(ham), "KASA_PSE_DENEME=gorunur-isaret-91") {
-		t.Fatal("ilk ortam blogu gorunmedi — artik risk notu (README) gozden gecirilmeli")
+		t.Fatal("initial environment block was not visible — the risk note (README) should now be reviewed")
 	}
 }
