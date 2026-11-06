@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-11-06
 
 - Standard Go layout: source moved to `cmd/kasa/` with English file names; module path is now `github.com/eirikaleid/kasa`. Build with `make install` or `go build ./cmd/kasa`.
 - All CLI output, errors, help text and code comments are in English.

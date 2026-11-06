@@ -10,7 +10,7 @@ description: Use when a command needs an API key, token, password or other crede
 ## Rules
 
 1. Run credentialed commands as `kasa run <profile> -- <command> [args]`. The profile's secrets become environment variables of that one command.
-2. **Never run `kasa get`**, `kasa unlock`, `kasa rm`, `kasa import` or `kasa backup-password set|rm`. They are human-only. Never try `security find-generic-password` or any other way to read the keychain.
+2. **Never run `kasa get`**, `kasa unlock`, `kasa rm`, `kasa which`, `kasa import` or `kasa backup-password set|rm`. They are human-only. Never try `security find-generic-password` or any other way to read the keychain.
 3. If `kasa` exits with **75**, the keychain is locked. Ask the user to run `kasa unlock` (or `kasa unlock --gui`) in their own terminal, then retry once. Do not loop.
 4. Do not widen a profile's `allow` list or edit hosts in `~/.config/kasa/profiles.json` unless the user explicitly asks.
 5. Never print or log the environment of a `kasa run` process.

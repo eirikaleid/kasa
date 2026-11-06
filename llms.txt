@@ -1,6 +1,6 @@
 # kasa
 
-> kasa is a macOS command-line tool that stores secrets in a separate, lockable keychain and lets AI coding agents run commands that use those secrets without ever seeing the values. Agents use `kasa run <profile> -- <command>`; raw reads (`kasa get`) are human-only.
+> kasa is a macOS command-line tool that stores secrets in a separate, lockable keychain and lets AI coding agents run commands that use those secrets without ever seeing the values. Agents use `kasa run <profile> -- <command>`; raw reads (`kasa get`) and value lookups (`kasa which`) are human-only.
 
 Key facts for agents: never ask the user to paste a secret; never call `kasa get`; exit code 75 means the keychain is locked and the human must run `kasa unlock`. The agent guard is best effort; real boundaries are the locked keychain, the agent's permission rules, and root-owned locked profiles.
 
