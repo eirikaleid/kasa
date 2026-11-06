@@ -118,6 +118,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa ls` | List key names (no values) | anyone |
 | `kasa get <ns/key>` | Print the raw value | human + TTY only |
 | `kasa rm <ns/key>` | Delete a secret | human + TTY only |
+| `kasa which [-i] [--prefix\|--suffix\|--contains]` | Find which key holds a value (value asked hidden, never printed) | human + TTY only |
 | `kasa run <profile> -- <cmd> [args]` | Run an allow-listed command with the profile's secrets as env vars | anyone |
 | `kasa mail send --profile <p> --to <addr> --subject <s> [--body <m> \| --body-file <f>]` | Send mail via the profile's SMTP settings | anyone |
 | `kasa profile ls \| edit \| path` | Show, edit or locate the profile file | anyone |
@@ -131,6 +132,10 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa version` | Print the version | anyone |
 
 Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pass`. The old Turkish command names (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) are still accepted as hidden aliases.
+
+## Finding a key from a value
+
+`kasa which` (alias `lookup`) tells you which key(s) hold a value you already have, so you can give an AI agent only the key or profile name. The value is asked through a hidden prompt (never argv), compared inside the `kasa` process and never printed. Modes: exact match by default (case-sensitive), `-i` case-insensitive (Turkish İ/I/ı are folded), `--prefix`, `--suffix`, `--contains` (partial modes need at least 4 characters). Exit status 1 when nothing matches. Human + TTY only.
 
 ## Profiles
 

@@ -52,6 +52,8 @@ func main() {
 		err = cmdRm(os.Args[2:])
 	case "run":
 		err = cmdRun(os.Args[2:])
+	case "which", "lookup":
+		err = cmdWhich(os.Args[2:])
 	case "mail":
 		err = cmdMail(os.Args[2:])
 	case "profile":
@@ -75,6 +77,9 @@ func main() {
 	default:
 		err = fmt.Errorf("unknown command: %s", os.Args[1])
 	}
+	if errors.Is(err, errEslesmeYok) {
+		os.Exit(1)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: "+err.Error())
 		if errors.Is(err, errKilitli) {
@@ -97,6 +102,8 @@ func usage() {
   kasa ls                       list keys (never shows values)
   kasa get <ns/key>             print the raw value  [human + TTY only]
   kasa rm  <ns/key>             delete               [human + TTY only]
+  kasa which [-i] [--prefix|--suffix|--contains]
+                                find which key holds a value (value prompted, hidden)  [human + TTY only]
 
   kasa run <profile> -- <cmd>   run a command with the profile's secrets as env vars
   kasa mail send --profile <p> --to <address> --subject <s> [--body <m>|--body-file <f>]

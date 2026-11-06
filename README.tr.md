@@ -65,7 +65,7 @@ Sırlar login keychain'inde değil, ayrı bir keychain'de durur (`~/Library/Keyc
 1. **`kasa run <profil> -- <komut>`** komutu tam yola çözer, profilin `allow` listesiyle karşılaştırır, asgari bir ortam kurar ([Profiller](#profiller)) ve sırları ekleyerek komutu `exec` eder. Serbest komut kabul edilmez.
 2. **Yetenek komutları** (`kasa mail send` gibi) sırrı `kasa` sürecinin içinde kullanır, dışarı vermez.
 
-`kasa get`, `kasa rm`, `kasa unlock` ve `kasa import` insanlar içindir: ajan ortamı algılanırsa ya da TTY yoksa çalışmayı reddeder. Her erişim `~/.local/state/kasa/audit.log` dosyasına yazılır (anahtar adı, asla değer).
+`kasa get`, `kasa rm`, `kasa which`, `kasa unlock` ve `kasa import` insanlar içindir: ajan ortamı algılanırsa ya da TTY yoksa çalışmayı reddeder. Her erişim `~/.local/state/kasa/audit.log` dosyasına yazılır (anahtar adı, asla değer).
 
 Keychain kilitliyse `kasa` pencere açmak yerine `75` (`EX_TEMPFAIL`) koduyla çıkar; ajanlar ve zamanlanmış işler temiz biçimde başarısız olur. Terminaldeki insan macOS parola penceresini görür; `KASA_SOR=1` bunu bilerek açar.
 
@@ -118,6 +118,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa ls` | Anahtar adlarını listele (değer yok) | herkes |
 | `kasa get <ns/anahtar>` | Ham değeri yazdır | yalnız insan + TTY |
 | `kasa rm <ns/anahtar>` | Sırrı sil | yalnız insan + TTY |
+| `kasa which [-i] [--prefix\|--suffix\|--contains]` | Değerin hangi anahtarda durduğunu bul (değer gizli sorulur, basılmaz) | yalnız insan + TTY |
 | `kasa run <profil> -- <komut> [argümanlar]` | Allow listesindeki komutu profilin sırlarıyla (env) çalıştır | herkes |
 | `kasa mail send --profile <p> --to <adres> --subject <s> [--body <m> \| --body-file <f>]` | Profilin SMTP ayarıyla posta gönder | herkes |
 | `kasa profile ls \| edit \| path` | Profil dosyasını göster, düzenle, yolunu yazdır | herkes |
@@ -131,6 +132,10 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa version` | Sürümü yazdır | herkes |
 
 Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pass`. Eski Türkçe komut adları (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) gizli takma ad olarak hâlâ kabul edilir.
+
+## Değerden anahtar bulma
+
+`kasa which` (takma ad `lookup`), elindeki bir değerin kasada hangi anahtar(lar)da durduğunu söyler; yapay zekaya yalnız anahtar/profil adını verirsin. Değer gizli istemle sorulur (argv'ye girmez), `kasa` süreci içinde karşılaştırılır ve asla basılmaz. Kipler: bayraksız tam eşleşme (harf duyarlı), `-i` harf duyarsız (Türkçe İ/I/ı katlanır), `--prefix`, `--suffix`, `--contains` (kısmi kiplerde en az 4 karakter). Eşleşme yoksa çıkış kodu 1.
 
 ## Profiller
 

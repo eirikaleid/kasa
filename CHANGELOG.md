@@ -6,6 +6,7 @@
 - All CLI output, errors, help text and code comments are in English.
 - English command and flag names are primary (`target add|rm`, `backup`, `backup-password status|set|rm`, `export --target --overwrite`, `mail --profile --subject --body`); the old Turkish names still work as hidden aliases.
 - Audit log: `who` is now `human`, detail notes are English; action names (`hedef.ekle`, ...) and backup file names are unchanged.
+- `kasa which` (alias `lookup`): reverse lookup from a value to key and profile names. The value is asked through a hidden prompt (never argv), compared inside the `kasa` process and never printed; human + TTY only. Modes: exact (constant-time), `-i` (Turkish-aware case folding), `--prefix`, `--suffix`, `--contains` (partial modes need at least 4 characters). Exits 1 when nothing matches.
 
 ## 1.0.0 — first public release
 
