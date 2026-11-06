@@ -50,6 +50,19 @@ kasa run github -- gh pr list
 }
 ```
 
+### Kabuk entegrasyonu (zorunlu adım)
+
+`kasa which` / `kasa lookup` komut satırları kabuk geçmişine hiç yazılmasın (ve `kasa which` korumanın açık olduğunu bilsin) diye kabuğunun rc dosyasına tek satır ekle:
+
+| Kabuk | Eklenecek satır | Dosya |
+|---|---|---|
+| zsh | `eval "$(kasa shell-init zsh)"` | `~/.zshrc` |
+| bash | `eval "$(kasa shell-init bash)"` | `~/.bashrc` |
+| fish | `kasa shell-init fish \| source` | `~/.config/fish/config.fish` |
+| PowerShell (`pwsh`) | `kasa shell-init pwsh \| Out-String \| Invoke-Expression` | `$PROFILE` |
+
+`kasa shell-init <kabuk>` yalnız kabuk kodu basar; keychain'e dokunmaz. Kod, `kasa which` ya da `kasa lookup` ile başlayan satırları (baştaki boşluk dahil) geçmişe yazdırmaz, var olan geçmiş kancanı ezmek yerine onunla zincirlenir ve `KASA_HISTORY_GUARD=1` koyar. Yeni bir kabuk açıp `echo $KASA_HISTORY_GUARD` çıktısının `1` olduğunu doğrula. kasa'nın kendisi yalnız macOS'tur; `pwsh` varyantı macOS'taki PowerShell ve ileride olası bir Windows desteği içindir. Fish'in `fish_should_add_to_history` kancasını çağıran bir sürümü gerekir; eski sürümlerde satır yine kaydedilir.
+
 <p align="center">
   <img src="assets/terminal-demo.svg" alt="Terminal gösterimi: sır ekleme, anahtar listeleme, ajanda get reddi, ajanda run başarısı" width="900">
 </p>
@@ -119,6 +132,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa get <ns/anahtar>` | Ham değeri yazdır | yalnız insan + TTY |
 | `kasa rm <ns/anahtar>` | Sırrı sil | yalnız insan + TTY |
 | `kasa which [bayraklar] <değer>...` | Değerin hangi anahtarda durduğunu bul; yalnız anahtar adlarını basar ([aşağıya](#değerden-anahtar-bulma) bakın) | yalnız insan + TTY |
+| `kasa shell-init <zsh\|bash\|fish\|pwsh>` | `kasa which` satırlarını kabuk geçmişinden uzak tutan kabuk kodunu bas ([Kabuk entegrasyonu](#kabuk-entegrasyonu-zorunlu-adım)) | herkes |
 | `kasa run <profil> -- <komut> [argümanlar]` | Allow listesindeki komutu profilin sırlarıyla (env) çalıştır | herkes |
 | `kasa mail send --profile <p> --to <adres> --subject <s> [--body <m> \| --body-file <f>]` | Profilin SMTP ayarıyla posta gönder | herkes |
 | `kasa profile ls \| edit \| path` | Profil dosyasını göster, düzenle, yolunu yazdır | herkes |
@@ -157,12 +171,7 @@ Bayraklar değerlerden önce ya da sonra gelebilir.
 
 Çıktı stdout'a gider. Eşleşme yoksa stdout boş kalır, stderr'e `no match` yazılır ve çıkış kodu 1 olur. Okunamayan anahtarlar stderr'de `unreadable: <ad>` olarak listelenir. Denetim günlüğüne yalnız kip ve sayılar yazılır; değer ya da desen asla.
 
-> **Uyarı:** argümanla verilen değer shell geçmişine düşer ve kısa süre `ps` çıktısında görünür. Ya `kasa which`'i değer vermeden çalıştır (gizli istem) ya da bu komutları zsh geçmişinden uzak tut. `~/.zshrc` dosyasına şunu ekle (`setopt extendedglob` gerekir):
->
-> ```zsh
-> setopt extendedglob
-> zshaddhistory() { [[ ${1##[[:space:]]#} == kasa[[:space:]]##(which|lookup)* ]] && return 1; return 0 }
-> ```
+> **Uyarı:** argümanla verilen değer shell geçmişine düşer ve kısa süre `ps` çıktısında görünür. [Kabuk entegrasyonunu](#kabuk-entegrasyonu-zorunlu-adım) kur (`eval "$(kasa shell-init zsh)"` vb.) ki bu satırlar kaydedilmesin, ya da `kasa which`'i değer vermeden çalıştır (gizli istem). Entegrasyon etkin değilse (`KASA_HISTORY_GUARD` boş) `kasa which` stderr'e tek satır uyarı basar; sonuç yine yazılır.
 
 ## Profiller
 

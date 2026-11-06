@@ -50,6 +50,19 @@ Make sure `~/.local/bin` is on your `PATH`. A minimal `~/.config/kasa/profiles.j
 }
 ```
 
+### Shell integration (required step)
+
+Add one line to your shell rc file so that `kasa which` / `kasa lookup` command lines never reach your shell history (and so `kasa which` knows the guard is active):
+
+| Shell | Line to add | File |
+|---|---|---|
+| zsh | `eval "$(kasa shell-init zsh)"` | `~/.zshrc` |
+| bash | `eval "$(kasa shell-init bash)"` | `~/.bashrc` |
+| fish | `kasa shell-init fish \| source` | `~/.config/fish/config.fish` |
+| PowerShell (`pwsh`) | `kasa shell-init pwsh \| Out-String \| Invoke-Expression` | `$PROFILE` |
+
+`kasa shell-init <shell>` only prints shell code; it does not touch the keychain. The code skips history for lines starting with `kasa which` or `kasa lookup` (leading space included), chains with any history hook you already have instead of replacing it, and sets `KASA_HISTORY_GUARD=1`. Open a new shell and check `echo $KASA_HISTORY_GUARD` prints `1`. kasa itself is macOS-only; the `pwsh` variant is for PowerShell on macOS and for a possible Windows port later. Fish needs a version that calls `fish_should_add_to_history`; on older versions the line is still saved.
+
 <p align="center">
   <img src="assets/terminal-demo.svg" alt="Terminal demo: add a secret, list keys, agent get is denied, agent run succeeds" width="900">
 </p>
@@ -119,6 +132,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa get <ns/key>` | Print the raw value | human + TTY only |
 | `kasa rm <ns/key>` | Delete a secret | human + TTY only |
 | `kasa which [flags] <value>...` | Find which key holds a value; prints key names only (see [below](#finding-a-key-from-a-value)) | human + TTY only |
+| `kasa shell-init <zsh\|bash\|fish\|pwsh>` | Print shell code that keeps `kasa which` out of shell history (see [Shell integration](#shell-integration-required-step)) | anyone |
 | `kasa run <profile> -- <cmd> [args]` | Run an allow-listed command with the profile's secrets as env vars | anyone |
 | `kasa mail send --profile <p> --to <addr> --subject <s> [--body <m> \| --body-file <f>]` | Send mail via the profile's SMTP settings | anyone |
 | `kasa profile ls \| edit \| path` | Show, edit or locate the profile file | anyone |
@@ -157,12 +171,7 @@ Flags may come before or after the values.
 
 Output goes to stdout. If nothing matches, stdout is empty, `no match` goes to stderr and the exit status is 1. Keys that cannot be read are listed on stderr as `unreadable: <name>`. The audit log records only the mode and counts, never a value or pattern.
 
-> **Warning:** a value given as an argument lands in your shell history and is visible in `ps` output for a moment. Either run `kasa which` without a value (hidden prompt), or keep these commands out of zsh history. Add this to `~/.zshrc` (it needs `setopt extendedglob`):
->
-> ```zsh
-> setopt extendedglob
-> zshaddhistory() { [[ ${1##[[:space:]]#} == kasa[[:space:]]##(which|lookup)* ]] && return 1; return 0 }
-> ```
+> **Warning:** a value given as an argument lands in your shell history and is visible in `ps` output for a moment. Install the [shell integration](#shell-integration-required-step) (`eval "$(kasa shell-init zsh)"` etc.) so these command lines are not saved, or run `kasa which` without a value (hidden prompt). If the integration is not active (`KASA_HISTORY_GUARD` empty), `kasa which` prints a one-line warning to stderr; the result is still printed.
 
 ## Profiles
 

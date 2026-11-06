@@ -54,6 +54,8 @@ func main() {
 		err = cmdRun(os.Args[2:])
 	case "which", "lookup":
 		err = cmdWhich(os.Args[2:])
+	case "shell-init":
+		err = cmdShellInit(os.Args[2:])
 	case "mail":
 		err = cmdMail(os.Args[2:])
 	case "profile":
@@ -103,6 +105,9 @@ func usage() {
   kasa get <ns/key>             print the raw value  [human + TTY only]
   kasa rm  <ns/key>             delete               [human + TTY only]
   kasa which [flags] <value>... find which key holds a value; prints key names only  [human + TTY only]
+
+  kasa shell-init <shell>       print shell code that keeps "kasa which" out of history: zsh|bash|fish|pwsh
+                                use: eval "$(kasa shell-init zsh)" in your shell rc
 
   kasa run <profile> -- <cmd>   run a command with the profile's secrets as env vars
   kasa mail send --profile <p> --to <address> --subject <s> [--body <m>|--body-file <f>]

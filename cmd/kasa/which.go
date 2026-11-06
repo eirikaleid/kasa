@@ -246,7 +246,8 @@ func cmdWhich(args []string) error {
 	if err := requireKasa(); err != nil {
 		return err
 	}
-	if len(degerler) == 0 {
+	argumanla := len(degerler) > 0
+	if !argumanla {
 		aranan, err := promptSecret("Value to find: ")
 		if err != nil {
 			return err
@@ -256,6 +257,9 @@ func cmdWhich(args []string) error {
 	q, err := yeniSorgu(k, degerler)
 	if err != nil {
 		return err
+	}
+	if w := whichUyari(argumanla, os.Getenv("KASA_HISTORY_GUARD")); w != "" {
+		fmt.Fprintln(os.Stderr, w)
 	}
 	keys, err := kcList()
 	if err != nil {

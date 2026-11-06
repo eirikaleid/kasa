@@ -7,7 +7,10 @@
 - Removed the 4-character minimum for partial modes; an empty value is still an error.
 - Output is now only the matching key names, sorted, one per line (no header, count or profile info). No match: empty stdout, `no match` on stderr, exit 1. Unreadable keys: `unreadable: <name>` on stderr.
 - Audit note is `mode=<..> values=<n> matches=<n> scanned=<n>`; it never contains a value or pattern.
-- Note: a value given as an argument is visible in shell history and briefly in `ps`; the README documents a zsh `zshaddhistory` rule and the prompt alternative.
+- New `kasa shell-init <zsh|bash|fish|pwsh>` (shell guessed from `$SHELL` when omitted) prints shell code that keeps `kasa which` / `kasa lookup` lines out of shell history and sets `KASA_HISTORY_GUARD=1`; use `eval "$(kasa shell-init zsh)"` in your rc file (a required install step, see README). It chains with existing history hooks instead of replacing them. `pwsh` is for PowerShell on macOS and a possible Windows port.
+- `kasa which` prints a one-line warning to stderr when values are given as arguments and `KASA_HISTORY_GUARD` is empty; the result is still printed. No warning on the hidden prompt path.
+- Agent docs (`AGENTS.md`, skill, `llms.txt`, `docs/agents.md`) tell an installing agent to add the `shell-init` line to the rc file idempotently and verify it.
+- Note: a value given as an argument is visible in shell history and briefly in `ps`; use `kasa shell-init` (see above) or the hidden prompt instead.
 
 ## 1.1.0 — 2026-11-06
 

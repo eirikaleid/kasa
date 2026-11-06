@@ -15,6 +15,10 @@ description: Use when a command needs an API key, token, password or other crede
 4. Do not widen a profile's `allow` list or edit hosts in `~/.config/kasa/profiles.json` unless the user explicitly asks.
 5. Never print or log the environment of a `kasa run` process.
 
+## Installing kasa
+
+After building and installing kasa, add the shell integration to the user's rc file, once (skip if `kasa shell-init` is already in it): zsh `~/.zshrc` and bash `~/.bashrc` get `eval "$(kasa shell-init zsh|bash)"`, fish `~/.config/fish/config.fish` gets `kasa shell-init fish | source`, pwsh `$PROFILE` gets `kasa shell-init pwsh | Out-String | Invoke-Expression`. Verify in a new shell that `echo $KASA_HISTORY_GUARD` prints `1`. `kasa shell-init` only prints code, so you may run it.
+
 ## Discover what exists
 
 ```bash

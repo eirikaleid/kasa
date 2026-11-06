@@ -12,6 +12,23 @@
 6. Do not edit `~/.config/kasa/profiles.json` to widen an allow list, add an interpreter such as `python3`, `bash` or `node`, or change a host, unless the human explicitly asked for that change.
 7. Never print, log, echo or write the environment of a `kasa run` process (`env`, `printenv`, `set`, `ps -E`).
 
+## Installing kasa (for agents doing the install)
+
+After you build and install the binary (`make install`), add the shell integration to the user's shell rc file so `kasa which` command lines stay out of shell history. Add the line only if it is not already there (idempotent), for the shell the user runs:
+
+```bash
+# zsh  (~/.zshrc)
+grep -qF 'kasa shell-init' ~/.zshrc 2>/dev/null || echo 'eval "$(kasa shell-init zsh)"' >> ~/.zshrc
+# bash (~/.bashrc)
+grep -qF 'kasa shell-init' ~/.bashrc 2>/dev/null || echo 'eval "$(kasa shell-init bash)"' >> ~/.bashrc
+# fish (~/.config/fish/config.fish)
+grep -qF 'kasa shell-init' ~/.config/fish/config.fish 2>/dev/null || echo 'kasa shell-init fish | source' >> ~/.config/fish/config.fish
+# pwsh ($PROFILE)
+if (-not (Select-String -Path $PROFILE -SimpleMatch 'kasa shell-init' -Quiet -ErrorAction SilentlyContinue)) { Add-Content $PROFILE 'kasa shell-init pwsh | Out-String | Invoke-Expression' }
+```
+
+Then verify in a new shell: `zsh -ic 'echo $KASA_HISTORY_GUARD'` (or the same with `bash`/`fish`) must print `1`. `kasa shell-init` only prints code and never reads secrets, so you may run it. Do not touch other lines of the rc file.
+
 ## Finding out what is available
 
 ```bash
