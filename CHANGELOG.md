@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-11-06
+
+- `kasa which` (alias `lookup`) now takes the values as arguments: `kasa which berke123`, `kasa which -i berke sezen --contains`. Flags may come before or after the values; everything after `--` is a value. Without any value the old hidden prompt is used.
+- New `-e`/`--regex` (Go RE2, matched anywhere in the value; with `-i` literal text is folded and escapes like `\D` are kept) and `--all` (all values must match; default is any).
+- Removed the 4-character minimum for partial modes; an empty value is still an error.
+- Output is now only the matching key names, sorted, one per line (no header, count or profile info). No match: empty stdout, `no match` on stderr, exit 1. Unreadable keys: `unreadable: <name>` on stderr.
+- Audit note is `mode=<..> values=<n> matches=<n> scanned=<n>`; it never contains a value or pattern.
+- Note: a value given as an argument is visible in shell history and briefly in `ps`; the README documents a zsh `zshaddhistory` rule and the prompt alternative.
+
 ## 1.1.0 — 2026-11-06
 
 - Standard Go layout: source moved to `cmd/kasa/` with English file names; module path is now `github.com/eirikaleid/kasa`. Build with `make install` or `go build ./cmd/kasa`.

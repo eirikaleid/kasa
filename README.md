@@ -118,7 +118,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa ls` | List key names (no values) | anyone |
 | `kasa get <ns/key>` | Print the raw value | human + TTY only |
 | `kasa rm <ns/key>` | Delete a secret | human + TTY only |
-| `kasa which [-i] [--prefix\|--suffix\|--contains]` | Find which key holds a value (value asked hidden, never printed) | human + TTY only |
+| `kasa which [flags] <value>...` | Find which key holds a value; prints key names only (see [below](#finding-a-key-from-a-value)) | human + TTY only |
 | `kasa run <profile> -- <cmd> [args]` | Run an allow-listed command with the profile's secrets as env vars | anyone |
 | `kasa mail send --profile <p> --to <addr> --subject <s> [--body <m> \| --body-file <f>]` | Send mail via the profile's SMTP settings | anyone |
 | `kasa profile ls \| edit \| path` | Show, edit or locate the profile file | anyone |
@@ -135,7 +135,34 @@ Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pas
 
 ## Finding a key from a value
 
-`kasa which` (alias `lookup`) tells you which key(s) hold a value you already have, so you can give an AI agent only the key or profile name. The value is asked through a hidden prompt (never argv), compared inside the `kasa` process and never printed. Modes: exact match by default (case-sensitive), `-i` case-insensitive (Turkish İ/I/ı are folded), `--prefix`, `--suffix`, `--contains` (partial modes need at least 4 characters). Exit status 1 when nothing matches. Human + TTY only.
+`kasa which` (alias `lookup`) tells you which key(s) hold a value you already have, so you can give an AI agent only the key name. The values are compared inside the `kasa` process and never printed; the output is only the matching key names, one per line, sorted. Human + TTY only.
+
+```bash
+kasa which berke123                         # exact match (case-sensitive, constant-time compare)
+kasa which -i berke sezen --contains        # either value appears anywhere, ignoring case
+kasa which --all berke sezen --contains     # BOTH values must appear
+kasa which -e '^berke\d+$'                  # regular expression (Go RE2), matched anywhere in the value
+kasa which -- -dash-value                   # everything after -- is a value
+kasa which                                  # no value given: asked through a hidden prompt
+```
+
+Flags may come before or after the values.
+
+| Flag | Meaning |
+|---|---|
+| `-i`, `--ignore-case` | Case-insensitive (Turkish İ/I/ı are folded) |
+| `--prefix`, `--suffix`, `--contains` | Partial match instead of exact match |
+| `-e`, `--regex` | Each value is a Go regexp (RE2) pattern, matched anywhere in the secret; cannot be combined with `--prefix`/`--suffix`/`--contains`. With `-i`, literal text is folded and `(?i)` is added; escapes such as `\D` or `\p{Greek}` are kept as they are |
+| `--all` | With several values, all of them must match (default: any one) |
+
+Output goes to stdout. If nothing matches, stdout is empty, `no match` goes to stderr and the exit status is 1. Keys that cannot be read are listed on stderr as `unreadable: <name>`. The audit log records only the mode and counts, never a value or pattern.
+
+> **Warning:** a value given as an argument lands in your shell history and is visible in `ps` output for a moment. Either run `kasa which` without a value (hidden prompt), or keep these commands out of zsh history. Add this to `~/.zshrc` (it needs `setopt extendedglob`):
+>
+> ```zsh
+> setopt extendedglob
+> zshaddhistory() { [[ ${1##[[:space:]]#} == kasa[[:space:]]##(which|lookup)* ]] && return 1; return 0 }
+> ```
 
 ## Profiles
 

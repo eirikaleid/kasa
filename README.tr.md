@@ -118,7 +118,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa ls` | Anahtar adlarını listele (değer yok) | herkes |
 | `kasa get <ns/anahtar>` | Ham değeri yazdır | yalnız insan + TTY |
 | `kasa rm <ns/anahtar>` | Sırrı sil | yalnız insan + TTY |
-| `kasa which [-i] [--prefix\|--suffix\|--contains]` | Değerin hangi anahtarda durduğunu bul (değer gizli sorulur, basılmaz) | yalnız insan + TTY |
+| `kasa which [bayraklar] <değer>...` | Değerin hangi anahtarda durduğunu bul; yalnız anahtar adlarını basar ([aşağıya](#değerden-anahtar-bulma) bakın) | yalnız insan + TTY |
 | `kasa run <profil> -- <komut> [argümanlar]` | Allow listesindeki komutu profilin sırlarıyla (env) çalıştır | herkes |
 | `kasa mail send --profile <p> --to <adres> --subject <s> [--body <m> \| --body-file <f>]` | Profilin SMTP ayarıyla posta gönder | herkes |
 | `kasa profile ls \| edit \| path` | Profil dosyasını göster, düzenle, yolunu yazdır | herkes |
@@ -135,7 +135,34 @@ Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pas
 
 ## Değerden anahtar bulma
 
-`kasa which` (takma ad `lookup`), elindeki bir değerin kasada hangi anahtar(lar)da durduğunu söyler; yapay zekaya yalnız anahtar/profil adını verirsin. Değer gizli istemle sorulur (argv'ye girmez), `kasa` süreci içinde karşılaştırılır ve asla basılmaz. Kipler: bayraksız tam eşleşme (harf duyarlı), `-i` harf duyarsız (Türkçe İ/I/ı katlanır), `--prefix`, `--suffix`, `--contains` (kısmi kiplerde en az 4 karakter). Eşleşme yoksa çıkış kodu 1.
+`kasa which` (takma ad `lookup`), elindeki bir değerin kasada hangi anahtar(lar)da durduğunu söyler; yapay zekaya yalnız anahtar adını verirsin. Değerler `kasa` süreci içinde karşılaştırılır ve asla basılmaz; çıktı yalnız eşleşen anahtar adlarıdır (satır başına bir, sıralı). Yalnız insan + TTY.
+
+```bash
+kasa which berke123                         # tam eşleşme (harf duyarlı, sabit zamanlı karşılaştırma)
+kasa which -i berke sezen --contains        # değerlerden biri herhangi bir yerde geçsin, harf duyarsız
+kasa which --all berke sezen --contains     # HER İKİ değer de geçsin
+kasa which -e '^berke\d+$'                  # düzenli ifade (Go RE2), değerin herhangi bir yerinde eşleşir
+kasa which -- -tireli-deger                 # -- sonrasının hepsi değerdir
+kasa which                                  # değer verilmezse gizli istemle sorulur
+```
+
+Bayraklar değerlerden önce ya da sonra gelebilir.
+
+| Bayrak | Anlamı |
+|---|---|
+| `-i`, `--ignore-case` | Harf duyarsız (Türkçe İ/I/ı katlanır) |
+| `--prefix`, `--suffix`, `--contains` | Tam eşleşme yerine kısmi eşleşme |
+| `-e`, `--regex` | Her değer bir Go regexp (RE2) desenidir, sırrın herhangi bir yerinde eşleşir; `--prefix`/`--suffix`/`--contains` ile birlikte verilemez. `-i` ile düz metin katlanır ve `(?i)` eklenir; `\D`, `\p{Greek}` gibi kaçışlar olduğu gibi korunur |
+| `--all` | Birden çok değerde HEPSİ eşleşmeli (varsayılan: herhangi biri) |
+
+Çıktı stdout'a gider. Eşleşme yoksa stdout boş kalır, stderr'e `no match` yazılır ve çıkış kodu 1 olur. Okunamayan anahtarlar stderr'de `unreadable: <ad>` olarak listelenir. Denetim günlüğüne yalnız kip ve sayılar yazılır; değer ya da desen asla.
+
+> **Uyarı:** argümanla verilen değer shell geçmişine düşer ve kısa süre `ps` çıktısında görünür. Ya `kasa which`'i değer vermeden çalıştır (gizli istem) ya da bu komutları zsh geçmişinden uzak tut. `~/.zshrc` dosyasına şunu ekle (`setopt extendedglob` gerekir):
+>
+> ```zsh
+> setopt extendedglob
+> zshaddhistory() { [[ ${1##[[:space:]]#} == kasa[[:space:]]##(which|lookup)* ]] && return 1; return 0 }
+> ```
 
 ## Profiller
 

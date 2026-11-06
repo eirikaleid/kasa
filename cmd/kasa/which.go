@@ -4,36 +4,38 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
-	"unicode/utf8"
 )
 
-// kasa which: degerden anahtar adina ters arama. Aranan deger YALNIZ gizli
-// istemden alinir (argv'de gorunmez); cikti yalniz anahtar/profil adi basar.
+// kasa which: degerden anahtar adina ters arama. Aranan degerler argumandan
+// (ya da hic verilmezse gizli istemden) alinir; cikti yalniz anahtar adlari.
 // Deger okuma tek surecte yapilir (alt surec olarak `kasa get` cagrilmaz).
+// Arguman shell gecmisine ve kisa sure `ps` ciktisina duser (README'de uyari var).
 
-// errEslesmeYok: eslesme yok; main sessizce 1 ile cikar (mesaj stdout'a basildi).
+// errEslesmeYok: eslesme yok; main sessizce 1 ile cikar ("no match" stderr'e basildi).
 var errEslesmeYok = errors.New("eslesme yok")
-
-// kismiMinRune: kismi kiplerde (prefix/suffix/contains) en kisa sorgu; "a"
-// gibi bir sorgu hemen her degerle eslesip sirrin yapisini sizdirirdi.
-const kismiMinRune = 4
 
 type whichKip struct {
 	IgnoreCase bool
 	Prefix     bool
 	Suffix     bool
 	Contains   bool
+	Regex      bool
+	All        bool
 }
 
 func (k whichKip) kismi() bool { return k.Prefix || k.Suffix || k.Contains }
 
-// String: audit notu icin; deger icermez.
+// String: audit notu icin; deger/desen icermez.
 func (k whichKip) String() string {
 	var p []string
 	switch {
+	case k.Regex:
+		p = append(p, "regex")
 	case k.Contains:
 		p = append(p, "contains")
 	case k.Prefix && k.Suffix:
@@ -48,6 +50,9 @@ func (k whichKip) String() string {
 	if k.IgnoreCase {
 		p = append(p, "i")
 	}
+	if k.All {
+		p = append(p, "all")
+	}
 	return strings.Join(p, "+")
 }
 
@@ -57,14 +62,11 @@ var trKatla = strings.NewReplacer("İ", "i", "I", "i", "ı", "i")
 // basina "I"yi "i", "ı"yi "ı" yapar ve "ISIK" ile "ışık" eslesmezdi.
 func katla(s string) string { return strings.ToLower(trKatla.Replace(s)) }
 
-// eslesir: saf eslestirici. Kisa sorgu denetimi cagiranin degil burada: kismi
-// kipte aranan < 4 rune ise hata.
+// eslesir: tek degeri tek aranan ile karsilastiran saf eslestirici (regex
+// disi kipler; regex icin whichSorgu).
 func eslesir(deger, aranan string, k whichKip) (bool, error) {
 	if aranan == "" {
 		return false, fmt.Errorf("search value is empty")
-	}
-	if k.kismi() && utf8.RuneCountInString(aranan) < kismiMinRune {
-		return false, fmt.Errorf("partial match needs at least %d characters", kismiMinRune)
 	}
 	if k.IgnoreCase {
 		deger, aranan = katla(deger), katla(aranan)
@@ -81,14 +83,112 @@ func eslesir(deger, aranan string, k whichKip) (bool, error) {
 	}
 }
 
-const whichKullanim = "usage: kasa which [-i] [--prefix|--suffix|--contains]"
+// desenKatla: -i ile regex deseninin yalniz DUZ metin kisimlarini katlar.
+// Kacis dizileri (\D, \S, \B, \pL, \p{Greek}) buyuk/kucuk harfe duyarlidir;
+// duz katla() onlari bozardi (\D -> \d anlam degistirir).
+func desenKatla(d string) string {
+	r := []rune(d)
+	var b strings.Builder
+	for i := 0; i < len(r); i++ {
+		if r[i] != '\\' || i+1 >= len(r) {
+			b.WriteString(katla(string(r[i])))
+			continue
+		}
+		b.WriteRune(r[i])
+		i++
+		b.WriteRune(r[i])
+		if (r[i] == 'p' || r[i] == 'P') && i+1 < len(r) {
+			if r[i+1] == '{' { // \p{Greek}: sinif adi oldugu gibi
+				for i+1 < len(r) {
+					i++
+					b.WriteRune(r[i])
+					if r[i] == '}' {
+						break
+					}
+				}
+			} else { // \pL
+				i++
+				b.WriteRune(r[i])
+			}
+		}
+	}
+	return b.String()
+}
 
-// whichBayraklari: which'e ozel kucuk ayristirici. Hepsi boolean; konumsal arguman
-// ve bilinmeyen bayrak hata (deger argv'den ASLA alinmaz).
-func whichBayraklari(args []string) (whichKip, error) {
+// whichSorgu: derlenmis sorgu; regex'ler bir kez derlenir.
+type whichSorgu struct {
+	kip      whichKip
+	degerler []string
+	desenler []*regexp.Regexp
+}
+
+// yeniSorgu: degerleri dogrular (bos deger, regex+kismi cakismasi, gecersiz desen).
+func yeniSorgu(k whichKip, degerler []string) (*whichSorgu, error) {
+	if len(degerler) == 0 {
+		return nil, fmt.Errorf("search value is empty")
+	}
+	if k.Regex && k.kismi() {
+		return nil, fmt.Errorf("--regex cannot be combined with --prefix, --suffix or --contains")
+	}
+	q := &whichSorgu{kip: k, degerler: degerler}
+	for _, d := range degerler {
+		if d == "" {
+			return nil, fmt.Errorf("search value is empty")
+		}
+		if !k.Regex {
+			continue
+		}
+		// Hata mesaji ham deseni gostersin (katlanmis (?i) halini degil).
+		if _, err := regexp.Compile(d); err != nil {
+			return nil, fmt.Errorf("invalid regex %q: %w", d, err)
+		}
+		if k.IgnoreCase {
+			d = "(?i)" + desenKatla(d)
+		}
+		re, err := regexp.Compile(d)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex: %w", err)
+		}
+		q.desenler = append(q.desenler, re)
+	}
+	return q, nil
+}
+
+// esles: OR (varsayilan) ya da --all ile AND.
+func (q *whichSorgu) esles(v string) bool {
+	if q.kip.Regex && q.kip.IgnoreCase {
+		v = katla(v)
+	}
+	for i := range q.degerler {
+		var ok bool
+		if q.kip.Regex {
+			ok = q.desenler[i].MatchString(v)
+		} else {
+			ok, _ = eslesir(v, q.degerler[i], q.kip)
+		}
+		if ok != q.kip.All {
+			return ok // OR: ilk eslesme; AND: ilk uymayan
+		}
+	}
+	return q.kip.All
+}
+
+const whichKullanim = "usage: kasa which [flags] <value>...\nflags: -i/--ignore-case  --prefix  --suffix  --contains  -e/--regex  --all  (-- ends flags)"
+
+// whichAyristir: bayraklar konumdan bagimsiz; `--` sonrasi her sey deger.
+// Hepsi boolean (-e deger yutmaz); bilinmeyen bayrak hata.
+func whichAyristir(args []string) (whichKip, []string, error) {
 	var k whichKip
+	var degerler []string
+	bayrakBitti := false
 	for _, a := range args {
+		if bayrakBitti || !strings.HasPrefix(a, "-") || a == "-" {
+			degerler = append(degerler, a)
+			continue
+		}
 		switch a {
+		case "--":
+			bayrakBitti = true
 		case "-i", "--ignore-case":
 			k.IgnoreCase = true
 		case "--prefix":
@@ -97,112 +197,75 @@ func whichBayraklari(args []string) (whichKip, error) {
 			k.Suffix = true
 		case "--contains":
 			k.Contains = true
+		case "-e", "--regex":
+			k.Regex = true
+		case "--all":
+			k.All = true
 		default:
-			return k, fmt.Errorf("unknown argument: %s\n%s", a, whichKullanim)
+			return k, nil, fmt.Errorf("unknown flag: %s\n%s", a, whichKullanim)
 		}
 	}
-	return k, nil
+	return k, degerler, nil
 }
 
-// profilHaritasi: kasa anahtari -> siralı profil adlari. Config okunamazsa nil + hata.
-func profilHaritasi() (map[string][]string, error) {
-	c, err := loadConfig()
-	if err != nil {
-		return nil, err
-	}
-	m := map[string][]string{}
-	for ad, p := range c.Profiles {
-		goruldu := map[string]bool{}
-		for _, anahtar := range p.Secrets {
-			a := anahtarNormal(anahtar)
-			if !goruldu[a] {
-				goruldu[a] = true
-				m[a] = append(m[a], ad)
-			}
+// whichTara: anahtarlari okuyup eslesen anahtar adlarini siralı stdout'a, okunamayanlari
+// stderr'e yazar. oku test icin disaridan verilir.
+func whichTara(q *whichSorgu, keys []string, oku func(string) (string, error), stdout, stderr io.Writer) (eslesen, taranan int) {
+	var bulunan, okunamayan []string
+	for _, key := range keys {
+		v, err := oku(key)
+		if err != nil {
+			okunamayan = append(okunamayan, key)
+			continue
+		}
+		b := []byte(v)
+		ok := q.esles(v)
+		sifirlaBayt(b)
+		if ok {
+			bulunan = append(bulunan, key)
 		}
 	}
-	for a := range m {
-		sort.Strings(m[a])
+	for _, key := range okunamayan {
+		fmt.Fprintln(stderr, "unreadable: "+key)
 	}
-	return m, nil
+	sort.Strings(bulunan)
+	for _, key := range bulunan {
+		fmt.Fprintln(stdout, key)
+	}
+	return len(bulunan), len(keys) - len(okunamayan)
 }
 
 func cmdWhich(args []string) error {
 	if err := requireHuman("which", "-"); err != nil {
 		return err
 	}
-	k, err := whichBayraklari(args)
+	k, degerler, err := whichAyristir(args)
 	if err != nil {
 		return err
 	}
 	if err := requireKasa(); err != nil {
 		return err
 	}
-	aranan, err := promptSecret("Value to find: ")
+	if len(degerler) == 0 {
+		aranan, err := promptSecret("Value to find: ")
+		if err != nil {
+			return err
+		}
+		degerler = []string{aranan}
+	}
+	q, err := yeniSorgu(k, degerler)
 	if err != nil {
-		return err
-	}
-	if aranan == "" {
-		return fmt.Errorf("search value is empty")
-	}
-	if _, err := eslesir("", aranan, k); err != nil { // yalniz sorgu denetimi
 		return err
 	}
 	keys, err := kcList()
 	if err != nil {
 		return err
 	}
-
-	type bulgu struct {
-		anahtar string
-		profil  []string
-	}
-	var bulunan []bulgu
-	var okunamayan []string
-	profiller, perr := profilHaritasi()
-	if perr != nil {
-		fmt.Fprintln(os.Stderr, "warning: could not read profiles, no profile column: "+perr.Error())
-	}
-	for _, key := range keys {
-		v, err := kcGet(key)
-		if err != nil {
-			okunamayan = append(okunamayan, key)
-			continue
-		}
-		b := []byte(v)
-		ok, _ := eslesir(v, aranan, k)
-		sifirlaBayt(b)
-		if ok {
-			bulunan = append(bulunan, bulgu{key, profiller[anahtarNormal(key)]})
-		}
-	}
-	taranan := len(keys) - len(okunamayan)
-	audit("OK", "which", "-", fmt.Sprintf("mode=%s matches=%d scanned=%d", k, len(bulunan), taranan))
-
-	for _, key := range okunamayan {
-		fmt.Fprintln(os.Stderr, "unreadable: "+key)
-	}
-	if len(bulunan) == 0 {
-		fmt.Printf("No match (%d scanned).\n", taranan)
+	eslesen, taranan := whichTara(q, keys, kcGet, os.Stdout, os.Stderr)
+	audit("OK", "which", "-", fmt.Sprintf("mode=%s values=%d matches=%d scanned=%d", k, len(degerler), eslesen, taranan))
+	if eslesen == 0 {
+		fmt.Fprintln(os.Stderr, "no match")
 		return errEslesmeYok
-	}
-	fmt.Printf("Found in %d key(s) (%d scanned):\n", len(bulunan), taranan)
-	genis := 0
-	for _, b := range bulunan {
-		if len(b.anahtar) > genis {
-			genis = len(b.anahtar)
-		}
-	}
-	for _, b := range bulunan {
-		son := ""
-		switch {
-		case perr != nil:
-		case len(b.profil) == 0:
-			son = "no profile"
-		default:
-			son = "profiles: " + strings.Join(b.profil, ", ")
-		}
-		fmt.Printf("  %-*s  %s\n", genis, b.anahtar, son)
 	}
 	return nil
 }

@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -102,8 +102,7 @@ func usage() {
   kasa ls                       list keys (never shows values)
   kasa get <ns/key>             print the raw value  [human + TTY only]
   kasa rm  <ns/key>             delete               [human + TTY only]
-  kasa which [-i] [--prefix|--suffix|--contains]
-                                find which key holds a value (value prompted, hidden)  [human + TTY only]
+  kasa which [flags] <value>... find which key holds a value; prints key names only  [human + TTY only]
 
   kasa run <profile> -- <cmd>   run a command with the profile's secrets as env vars
   kasa mail send --profile <p> --to <address> --subject <s> [--body <m>|--body-file <f>]
