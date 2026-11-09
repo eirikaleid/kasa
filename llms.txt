@@ -6,6 +6,8 @@ Optional install step for agents: after building kasa, you may add `eval "$(kasa
 
 An allow entry can pin the first arguments (`python3 ~/Developer/x/`, `python3 -m module`) so an interpreter cannot run `-c` code; `kasa profile test <profile> -- <command> [args]` is a read-only dry run of that check. kasa warns on stderr (`kasa profile ls`, `run`, `profile test`) about interpreter entries in unlocked profiles that pin no path and no `-m`; it never blocks.
 
+When the output of `kasa run` is not a terminal, kasa masks the profile's secret values in it (`***`, exact match only, accidental leaks only; it does not stop base64 or character-by-character leaks). Do not try to get around it.
+
 Key facts for agents: never ask the user to paste a secret; never call `kasa get`; exit code 75 means the keychain is locked and the human must run `kasa unlock`. The agent guard is best effort; real boundaries are the locked keychain, the agent's permission rules, and root-owned locked profiles.
 
 ## Docs

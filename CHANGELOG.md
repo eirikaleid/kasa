@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.3.0 — 2026-11-09
+
+- **Output masking for `kasa run`.** If stdout and stderr are both terminals, nothing changes: kasa still replaces itself with the command (`exec`). If one or both are not (agent, pipe, redirect), kasa runs the command as a child instead: stdin goes straight to it, a stream that is a terminal goes straight to it, and every other stream is read by kasa, masked and written to the real output.
+- Masking: every secret value of the profile that is at least 6 bytes long (shorter ones would match ordinary text) becomes `***`; longest value first, so a value that is a prefix of another does not cut it. It works on bytes, with no wait for a newline; only the end of a chunk that could still be the start of a value is held back (always shorter than the longest value), so a value split across two reads is caught. Binary data passes unchanged.
+- **This only catches accidental leaks** (a debug line or error message that echoes a value). It does not stop base64, hex, character-by-character or any other deliberate leak. SECURITY.md says so.
+- SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2 and SIGWINCH are forwarded to the child (a signal that was ignored when kasa started stays ignored). The child shares kasa's process group, so when kasa is in a terminal's foreground group the terminal already delivers Ctrl-C, Ctrl-\ and resizes to it: those three are then not forwarded again. The exit status is the child's (128+signal if it was killed by one); kasa prints nothing of its own.
+- Memory: in this mode the kasa process lives until the child exits and holds the values; the copies used for masking are wiped afterwards (Go strings cannot be). SECURITY.md lists it next to the `ps -E` item.
+- **Audit:** the `OK run` line now ends with the mode: `command [matching allow entry] masked` or `... exec`. If something was masked, `NOTE run <profile> masked N occurrence(s)` follows when the child is done (never the value). Anything that parses the old `OK run` note must accept the new suffix.
+- Tests: masker unit tests (every split point, prefix-related values, short values, binary data, empty stream) and end-to-end tests with a real `/bin/sh` child (stdout and stderr masked, exit status 7, killed-by-signal status, SIGTERM forwarded, stdin, terminal stream passed straight through and `exec` kept, under a pseudo-terminal from script(1)).
+- Docs: README (EN/TR), SECURITY.md (run item, masking items, residual risk), AGENTS.md, skill, `llms.txt`.
+
 ## 2.2.0 — 2026-11-09
 
 - **Warning for risky `allow` entries.** In an unlocked profile (`~/.config/kasa/profiles.json`), an entry is risky when its command (basename, case-insensitive, version suffix removed: `python3.13` -> `python`) is `python`, `node`, `deno`, `bun`, a shell (`sh bash zsh dash ksh fish`), `perl`, `ruby`, `php`, `lua`, `tclsh`, `Rscript`, `osascript`, `uv`, `uvx`, `pipx`, `npx`, `npm`, `pnpm`, `yarn`, `java`, `env`, `xargs`, `awk`, `gawk`, `find`, `curl` or `*`, and none of its pinned arguments is a path (`/...`, `~/...`) or a plain `-m`. Examples: `python3`, `npm run`, `uv run name` warn; `python3 ~/x/`, `python3 -m pkg`, `uv run --project ~/x name`, `gh` do not.

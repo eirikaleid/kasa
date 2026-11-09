@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -545,7 +546,8 @@ func TestProfilTestDispatchUyariVeAudit(t *testing.T) {
 }
 
 // TestRunYardimci is not a test: it is the child process of TestRunUyari. It
-// calls cmdRun, which replaces the process with the allowed command.
+// calls cmdRun, which replaces the process with the allowed command (or, with
+// a non-terminal output, runs it as a child and returns).
 func TestRunYardimci(t *testing.T) {
 	ev := os.Getenv("KASA_TEST_RUN_EV")
 	if ev == "" {
@@ -554,9 +556,14 @@ func TestRunYardimci(t *testing.T) {
 	testEvDizini, KilitliProfilYolu = ev, filepath.Join(ev, "yok.json")
 	testKeychainYolu = filepath.Join(ev, "kasa.keychain-db")
 	if err := cmdRun(flag.Args()); err != nil {
+		var kod cikisKodu
+		if errors.As(err, &kod) {
+			os.Exit(int(kod))
+		}
 		os.Stderr.WriteString("run error: " + err.Error() + "\n")
 		os.Exit(1)
 	}
+	os.Exit(0) // the child ran under cmdRun (output not a terminal): do not let the test print PASS
 }
 
 func TestRunUyari(t *testing.T) {
@@ -596,7 +603,7 @@ func TestRunUyari(t *testing.T) {
 	if !strings.Contains(log, "\tNOTE\trun\triskli\t") || !strings.Contains(log, "\trisky allow entry: "+py+"\n") {
 		t.Errorf("missing NOTE line:\n%s", log)
 	}
-	if !strings.Contains(log, "\tOK\trun\triskli\t") || !strings.Contains(log, "\tpython3 ["+py+"]\n") {
+	if !strings.Contains(log, "\tOK\trun\triskli\t") || !strings.Contains(log, "\tpython3 ["+py+"] masked\n") {
 		t.Errorf("OK line changed:\n%s", log)
 	}
 	if strings.Count(log, "risky allow entry") != 1 {

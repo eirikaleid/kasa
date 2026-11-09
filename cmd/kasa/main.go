@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.2.0"
+const version = "2.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -81,6 +81,10 @@ func main() {
 	}
 	if errors.Is(err, errEslesmeYok) {
 		os.Exit(1)
+	}
+	var kod cikisKodu
+	if errors.As(err, &kod) {
+		os.Exit(int(kod)) // the child's own status; kasa prints nothing
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: "+err.Error())
@@ -483,9 +487,26 @@ func cmdRun(args []string) error {
 	if riskliUyar(c, name, eslesen) {
 		audit("NOTE", "run", name, "risky allow entry: "+eslesen)
 	}
-	audit("OK", "run", name, base+" ["+eslesen+"]")
-	// Replace the process via exec: the secret never leaves this process's memory.
-	return syscall.Exec(bin, cmdline, full)
+	// Both streams on a terminal (a human, tgbot approval, interactive ssh):
+	// replace the process via exec, nothing changes. Otherwise (agent, pipe)
+	// the child runs under kasa so accidental secret output can be masked.
+	if terminalMi(os.Stdout) && terminalMi(os.Stderr) {
+		audit("OK", "run", name, base+" ["+eslesen+"] exec")
+		// The secret never leaves this process's memory.
+		return syscall.Exec(bin, cmdline, full)
+	}
+	audit("OK", "run", name, base+" ["+eslesen+"] masked")
+	kod, n, err := cocukCalistir(bin, cmdline, full, maskeDegerleri(env), os.Stdin, os.Stdout, os.Stderr)
+	if n > 0 {
+		audit("NOTE", "run", name, fmt.Sprintf("masked %d occurrence(s)", n))
+	}
+	if err != nil {
+		return err
+	}
+	if kod != 0 {
+		return cikisKodu(kod)
+	}
+	return nil
 }
 
 func cmdMail(args []string) error {

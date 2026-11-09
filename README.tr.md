@@ -75,7 +75,7 @@ kasa run github -- gh pr list
 
 Sırlar login keychain'inde değil, ayrı bir keychain'de durur (`~/Library/Keychains/kasa.keychain-db`). 12 saat işlem olmazsa otomatik kilitlenir; kilitliyken kimse bir şey okuyamaz. Ajanlar sırları iki yolla kullanabilir ve ikisi de değeri açığa çıkarmaz:
 
-1. **`kasa run <profil> -- <komut>`** komutu tam yola çözer, profilin `allow` listesiyle karşılaştırır, asgari bir ortam kurar ([Profiller](#profiller)) ve sırları ekleyerek komutu `exec` eder. Serbest komut kabul edilmez.
+1. **`kasa run <profil> -- <komut>`** komutu tam yola çözer, profilin `allow` listesiyle karşılaştırır, asgari bir ortam kurar ([Profiller](#profiller)) ve sırları ekleyerek komutu çalıştırır. Serbest komut kabul edilmez. stdout ve stderr'in ikisi de terminalse komut kasa'nın yerine geçer (`exec`); değilse kasa komutu çocuk süreç olarak çalıştırır, terminal olmayan çıktıdaki her sır değerini (6 bayt ve üstü) `***` ile değiştirir, sinyalleri iletir, çocuğun çıkış kodunu ve stdin'ini aynen verir. Bu yalnız kazara sızmayı yakalar, kasıtlı sızmayı (base64, harf harf) yakalamaz.
 2. **Yetenek komutları** (`kasa mail send` gibi) sırrı `kasa` sürecinin içinde kullanır, dışarı vermez.
 
 `kasa get`, `kasa rm`, `kasa which`, `kasa unlock` ve `kasa import` insanlar içindir: ajan ortamı algılanırsa ya da TTY yoksa çalışmayı reddeder. Her erişim `~/.local/state/kasa/audit.log` dosyasına yazılır (anahtar adı, asla değer).

@@ -11,6 +11,7 @@
 5. **Exit code 75 means the keychain is locked.** Stop and ask the human to run `kasa unlock` (or `kasa unlock --gui`) in their own terminal, then retry. Do not loop.
 6. Do not edit `~/.config/kasa/profiles.json` to widen an allow list, add an interpreter such as `python3`, `bash` or `node`, or change a host, unless the human explicitly asked for that change.
 7. Never print, log, echo or write the environment of a `kasa run` process (`env`, `printenv`, `set`, `ps -E`).
+8. `***` in the output of `kasa run` is kasa masking a secret value (it only does this when the output is not a terminal). Do not work around it.
 
 ## Installing kasa (for agents doing the install)
 

@@ -14,6 +14,7 @@ description: Use when a command needs an API key, token, password or other crede
 3. If `kasa` exits with **75**, the keychain is locked. Ask the user to run `kasa unlock` (or `kasa unlock --gui`) in their own terminal, then retry once. Do not loop.
 4. Do not widen a profile's `allow` list or edit hosts in `~/.config/kasa/profiles.json` unless the user explicitly asks.
 5. Never print or log the environment of a `kasa run` process.
+6. If you see `***` in the output of `kasa run`, that is kasa masking a secret value. Do not try to get around it (encoding, splitting, writing it to a file); it only exists to catch accidents.
 
 ## Installing kasa
 

@@ -75,7 +75,7 @@ Make sure `~/.local/bin` is on your `PATH`. A minimal `~/.config/kasa/profiles.j
 
 Secrets live in a dedicated keychain (`~/Library/Keychains/kasa.keychain-db`), not in your login keychain. It auto-locks after 12 hours of inactivity; while it is locked nobody can read anything. Agents can use secrets in two ways, and neither reveals the value:
 
-1. **`kasa run <profile> -- <cmd>`** resolves `<cmd>` to a full path, checks it against the profile's `allow` list, builds a minimal environment (see [Profiles](#profiles)) and `exec`s the command with the secrets added. Free-form commands are refused.
+1. **`kasa run <profile> -- <cmd>`** resolves `<cmd>` to a full path, checks it against the profile's `allow` list, builds a minimal environment (see [Profiles](#profiles)) and runs the command with the secrets added. Free-form commands are refused. If stdout and stderr are both terminals the command replaces kasa (`exec`); otherwise kasa runs it as a child, replaces every secret value (6 bytes or more) in the non-terminal output with `***`, forwards signals and returns the child's exit status and stdin. This catches accidental leaks only, not deliberate ones (base64, character by character).
 2. **Capability commands** such as `kasa mail send` use the secret inside the `kasa` process and never hand it out.
 
 `kasa get`, `kasa rm`, `kasa unlock` and `kasa import` are for humans: they refuse to run inside a detected agent environment or without a TTY. Every access is written to `~/.local/state/kasa/audit.log` (key names, never values).
