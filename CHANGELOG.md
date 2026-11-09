@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0 — 2026-11-09
+
+- **Pinned arguments in `allow`.** An entry with spaces is split into tokens: the first is the command (same rules as before), the rest pin argv[1..n]. A token that is an absolute or `~/` path ending in `/` is a directory pin (the argument must be a regular file below it, after symlink resolution, not starting with `-`; `../` and symlinks pointing outside are refused; `<dir>x` is not below `<dir>/`). A path token without a trailing `/` must match exactly. Any other token is plain text and must be equal (`python3 -m trend_radar.bildir`). Arguments after the pinned prefix are free. Too few arguments never match. Entries without spaces behave exactly as before. This closes `python3 -c 'print(os.environ)'` for profiles that allow an interpreter; it is a speed bump if the pinned script is user-writable (SECURITY.md).
+- Rejections name the entry and the reason (`entry "python3 ~/x/": argument 1 must be ...`); argument values are never echoed.
+- Locked profiles: in a pinned entry the command and every path token must be absolute and clean; relative paths (`x/y.py`, `./y.py`) and `~/` are refused. Plain-text tokens are allowed, but only an absolute path pin to a root-owned script is a boundary (`-m module` and bare file names resolve against the agent-controlled cwd).
+- New `kasa profile test <profile> -- <cmd> [arg...]`: dry run of the allow check. Prints the path that would be exec'd and `allowed: <entry>`, or exits 1 with the reason. Runs nothing, reads no secret, works while locked and in an agent session.
+- Audit: the `OK run` note is now `command [matching allow entry]` (for example `python3 [python3 ~/Developer/x/]`); arguments are never logged.
+- Build: the Makefile includes an optional, git-ignored `local.mk` (see `local.mk.example`) so `TRUSTED_DIRS` and `DEV_ROOT` survive a plain `make install`. Values on the command line still win.
+- Docs: README (EN/TR) allow section and build note, SECURITY.md interpreter entry, AGENTS.md, skill, `llms.txt`.
+
 ## 2.0.0 — 2026-11-09
 
 - **BREAKING:** `kasa which` (alias `lookup`) no longer accepts values as arguments. Values are read only from a hidden prompt (no echo, TTY): `Value 1 (empty line to finish): `, `Value 2 ...`; an empty first line is `search value is empty`. Any argument that is not a flag, `--`, and unknown flags are rejected before the keychain is touched; the error and the audit note never contain what was typed. Flags stay as arguments (`-i`, `--prefix`, `--suffix`, `--contains`, `-e`/`--regex`, `--all`). Old command lines that passed the value (including after `--`) no longer work; run `kasa which` and type the value at the prompt.

@@ -138,6 +138,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa run <profile> -- <cmd> [args]` | Run an allow-listed command with the profile's secrets as env vars | anyone |
 | `kasa mail send --profile <p> --to <addr> --subject <s> [--body <m> \| --body-file <f>]` | Send mail via the profile's SMTP settings | anyone |
 | `kasa profile ls \| edit \| path` | Show, edit or locate the profile file | anyone |
+| `kasa profile test <profile> -- <cmd> [args]` | Dry run: would `run` allow this command line? Runs nothing, reads no secret, works while locked | anyone |
 | `kasa audit [-n 30]` | Show the access log | anyone |
 | `kasa target add\|rm\|ls [dir]` | Manage backup targets | human |
 | `kasa export` | Write an encrypted backup to every target | needs backup password |
@@ -200,6 +201,12 @@ A profile maps environment variable names to key names and lists the commands al
 
 - A bare name (`"gh"`) matches only when the binary sits in a trusted directory (system directories, `/opt/homebrew`, `~/.local/bin`, pipx venvs, plus anything you bake in with [`TRUSTED_DIRS` / `DEV_ROOT`](#build-options)) and, for symlinks, the target is trusted too.
 - An absolute entry (`"/usr/local/bin/deploy"`, `"~/bin/deploy"`) must match the resolved path exactly.
+- **Pinned arguments.** An entry with spaces is split into tokens: the first is the command (a bare name or an absolute path, as above), the rest pin the first arguments. A bare `"python3"` lets an agent run `python3 -c 'print(os.environ)'` and read every secret in the profile; pinning prevents that. Arguments after the pinned prefix are free (the script's own arguments).
+  - `"python3 ~/Developer/x/"` (path ending in `/`): the first argument must be a regular file below that directory, after symlinks are resolved. It may not start with `-`, and `../` or a symlink pointing outside is refused.
+  - `"python3 ~/Developer/x/run.py"` (path without `/`): the first argument must resolve to exactly that file.
+  - `"python3 -m trend_radar.bildir"` (anything else): plain text, must be equal.
+
+  `python3 -c`, `node -e` or `sh -c` do not match any of these, so they are refused. Entries without spaces behave as before. A locked profile needs an absolute, clean command and absolute, clean path tokens (plain-text tokens such as `-m` are accepted, but `-m module` and bare file names resolve against the working directory the agent controls, so only an absolute path to a root-owned script is a real boundary, even in a locked profile). If the pinned directory or script is writable by you, an agent can edit the script: pinning is a speed bump, not a boundary (see [SECURITY.md](SECURITY.md)). `kasa profile test <profile> -- <cmd> [args]` shows which entry matches, or why none does. `kasa audit` logs the matching entry next to the command name, never the arguments.
 
 **Environment.** The child process never inherits your full environment. It gets a fixed `PATH`, the profile's secrets, and an allow-list of variables (default: `HOME USER LOGNAME SHELL TMPDIR TERM COLORTERM NO_COLOR TZ LANG LC_* SSH_AUTH_SOCK`). Override it per profile with `"ortam": ["LANG", "LC_*", "MY_VAR"]`; `"ortam": []` means only `PATH` and secrets. Injection variables (`DYLD_*`, `LD_*`, `BASH_ENV`, `GIT_*`, `NODE_*`, `PYTHON*`, proxy and CA variables, ...) are always dropped, and the drop is logged as a `NOTE` with the variable name only.
 
@@ -277,6 +284,8 @@ make install TRUSTED_DIRS="~/bin:/opt/tools/bin" DEV_ROOT="~/src"
 | `DEV_ROOT` | Project root; `<root>/**/.venv/bin` and `venv/bin` become trusted, and symlinks may point below it |
 
 These are baked into the binary at build time on purpose. A runtime config file would be writable by the very agents kasa guards against, which could add their own directory and bypass the allow check. The build also signs the binary with the hardened runtime so that `dyld` ignores `DYLD_*` variables for `kasa` itself, and it needs cgo (the home directory is read from the account database, not from `$HOME`).
+
+To keep these across rebuilds, copy [`local.mk.example`](local.mk.example) to `local.mk` (git-ignored). The Makefile includes it, so a plain `make install` bakes the same values in; a value given on the command line still wins. Without it, a plain `make install` builds with both empty and venv or `TRUSTED_DIRS` commands stop matching.
 
 Other targets: `make build`, `make test`, `make vet`, `make clean`.
 

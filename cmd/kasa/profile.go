@@ -119,11 +119,45 @@ func kilitliUygula(c *Config, yol string) error {
 // those can be user-writable (~/.local/bin, TRUSTED_DIRS); "~/" permits the
 // user's home directory and "*" permits everything. A profile locked by root
 // must not end up bound to a binary in a directory the agent can write.
+//
+// An entry with pinned arguments ("/usr/bin/python3 /opt/x/") follows the same
+// rule for the command and for every path token: absolute and clean (a trailing
+// "/" on a directory pin is allowed). Plain-text tokens ("-m", "module") are
+// kept as they are, but a relative path ("x/y.py", "./y.py") or "~/" would be
+// resolved against the user's cwd or home, so they are refused.
 func kilitliAllowDenetle(allow []string) error {
 	for _, a := range allow {
+		if tokenlar := strings.Fields(a); len(tokenlar) > 1 {
+			if err := kilitliSabitDenetle(a, tokenlar); err != nil {
+				return err
+			}
+			continue
+		}
 		if !strings.HasPrefix(a, "/") || filepath.Clean(a) != a {
 			return fmt.Errorf("allow entry %q must be an absolute, clean path "+
 				"(bare names, ~ or * are not accepted in a locked profile)", a)
+		}
+	}
+	return nil
+}
+
+func kilitliSabitDenetle(a string, tokenlar []string) error {
+	if !strings.HasPrefix(tokenlar[0], "/") || filepath.Clean(tokenlar[0]) != tokenlar[0] {
+		return fmt.Errorf("allow entry %q: the command %q must be an absolute, clean path", a, tokenlar[0])
+	}
+	for _, t := range tokenlar[1:] {
+		yol := t
+		if t != "/" {
+			yol = strings.TrimSuffix(t, "/")
+		}
+		switch {
+		case strings.HasPrefix(t, "/"):
+			if filepath.Clean(yol) != yol {
+				return fmt.Errorf("allow entry %q: path token %q must be clean", a, t)
+			}
+		case strings.HasPrefix(t, "~/"), strings.Contains(t, "/"):
+			return fmt.Errorf("allow entry %q: path token %q must be absolute "+
+				"(relative paths and ~ are not accepted in a locked profile)", a, t)
 		}
 	}
 	return nil

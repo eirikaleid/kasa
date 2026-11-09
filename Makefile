@@ -6,6 +6,11 @@
 #
 # TRUSTED_DIRS / DEV_ROOT are baked into the binary on purpose: a config file
 # would be writable by the very agents kasa is guarding against.
+#
+# So they are not lost on a plain `make install`, put them in local.mk (git-ignored,
+# see local.mk.example). A value given on the command line still wins.
+
+-include local.mk
 
 BINDIR       ?= $(HOME)/.local/bin
 TRUSTED_DIRS ?=

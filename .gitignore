@@ -1,6 +1,9 @@
 # Compiled binary
 /kasa
 
+# Per-machine build settings (TRUSTED_DIRS / DEV_ROOT), see local.mk.example
+/local.mk
+
 # Files that carry secrets: even when encrypted, they never go into the repo.
 # An encrypted backup in the repo is exposed to offline password guessing;
 # backups live in targets outside the repo (kasa target add <dir>).

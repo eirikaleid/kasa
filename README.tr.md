@@ -138,6 +138,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa run <profil> -- <komut> [argümanlar]` | Allow listesindeki komutu profilin sırlarıyla (env) çalıştır | herkes |
 | `kasa mail send --profile <p> --to <adres> --subject <s> [--body <m> \| --body-file <f>]` | Profilin SMTP ayarıyla posta gönder | herkes |
 | `kasa profile ls \| edit \| path` | Profil dosyasını göster, düzenle, yolunu yazdır | herkes |
+| `kasa profile test <profil> -- <komut> [argümanlar]` | Kuru deneme: `run` bu komut satırına izin verir miydi? Hiçbir şey çalıştırmaz, sır okumaz, kilitliyken de çalışır | herkes |
 | `kasa audit [-n 30]` | Erişim günlüğünü göster | herkes |
 | `kasa target add\|rm\|ls [dizin]` | Yedek hedeflerini yönet | insan |
 | `kasa export` | Tüm hedeflere şifreli yedek yaz | yedek parolası gerekir |
@@ -200,6 +201,12 @@ Profil, ortam değişkeni adlarını anahtar adlarına eşler ve bunları alabil
 
 - Çıplak ad (`"gh"`), yalnızca ikili güvenilen bir dizindeyse eşleşir (sistem dizinleri, `/opt/homebrew`, `~/.local/bin`, pipx venv'leri ve [`TRUSTED_DIRS` / `DEV_ROOT`](#derleme-seçenekleri) ile derlemeye gömdükleriniz); symlink ise hedefi de güvenilir olmalıdır.
 - Mutlak girdi (`"/usr/local/bin/deploy"`, `"~/bin/deploy"`) çözülmüş yolla birebir aynı olmalıdır.
+- **Argüman sabitleme.** Boşluk içeren girdi token'lara bölünür: ilki komuttur (yukarıdaki gibi çıplak ad ya da mutlak yol), kalanlar ilk argümanları sabitler. Yalın `"python3"` girdisi ajanın `python3 -c 'print(os.environ)'` çalıştırıp profilin tüm sırlarını okumasına yol açar; sabitleme bunu engeller. Sabit ön ekten sonraki argümanlar serbesttir (betiğin kendi argümanları).
+  - `"python3 ~/Developer/x/"` (`/` ile biten yol): ilk argüman, symlink'ler çözüldükten sonra o dizinin altında normal bir dosya olmalıdır. `-` ile başlayamaz; `../` ve dışarıyı gösteren symlink reddedilir.
+  - `"python3 ~/Developer/x/run.py"` (`/` ile bitmeyen yol): ilk argüman tam olarak bu dosyaya çözülmelidir.
+  - `"python3 -m trend_radar.bildir"` (diğerleri): düz metindir, birebir eşit olmalıdır.
+
+  `python3 -c`, `node -e` ya da `sh -c` bunların hiçbirine uymaz, reddedilir. Boşluksuz girdiler eskisi gibi davranır. Kilitli profilde komut ve yol token'ları mutlak ve temiz olmalıdır (`-m` gibi düz metin token'lar kabul edilir, ancak `-m modül` ve çıplak dosya adları ajanın denetlediği çalışma dizinine göre çözülür; gerçek sınır, kilitli profilde bile yalnızca root sahipli betiğe mutlak yol sabitidir). Sabitlenen dizin ya da betik sizin yazabildiğiniz bir yerdeyse ajan betiği düzenleyebilir: sabitleme hız kesicidir, sınır değildir ([SECURITY.md](SECURITY.md)). `kasa profile test <profil> -- <komut> [argümanlar]` hangi girdinin eşleştiğini ya da neden hiçbirinin eşleşmediğini gösterir. `kasa audit` komut adının yanına eşleşen girdiyi yazar, argümanları asla.
 
 **Ortam.** Çocuk süreç ortamınızın tamamını miras almaz. Sabit bir `PATH`, profilin sırları ve bir değişken beyaz listesi alır (varsayılan: `HOME USER LOGNAME SHELL TMPDIR TERM COLORTERM NO_COLOR TZ LANG LC_* SSH_AUTH_SOCK`). Profil başına `"ortam": ["LANG", "LC_*", "MY_VAR"]` ile değiştirilir; `"ortam": []` yalnızca `PATH` ve sırlar demektir. Enjeksiyon değişkenleri (`DYLD_*`, `LD_*`, `BASH_ENV`, `GIT_*`, `NODE_*`, `PYTHON*`, proxy ve CA değişkenleri, ...) her zaman atılır; atılma, yalnızca değişken adıyla `NOTE` olarak günlüğe yazılır.
 
@@ -277,6 +284,8 @@ make install TRUSTED_DIRS="~/bin:/opt/tools/bin" DEV_ROOT="~/src"
 | `DEV_ROOT` | Proje kökü; `<kök>/**/.venv/bin` ve `venv/bin` güvenilir olur, symlink'ler kökün altına gidebilir |
 
 Bunlar bilerek derleme anında ikiliye gömülür. Çalışma anında okunan bir yapılandırma dosyasını, kasa'nın karşı korunduğu ajanlar yazabilirdi; kendi dizinlerini ekleyip allow kontrolünü aşarlardı. Derleme ayrıca ikiliyi hardened runtime ile imzalar; böylece `dyld`, `kasa`'nın kendisi için `DYLD_*` değişkenlerini yok sayar. cgo gerekir (ev dizini `$HOME`'dan değil hesap veritabanından okunur).
+
+Bunların derlemeler arasında kaybolmaması için [`local.mk.example`](local.mk.example) dosyasını `local.mk` olarak kopyalayın (git'e girmez). Makefile onu dahil eder; yalın `make install` aynı değerleri gömer, komut satırından verilen değer yine önceliklidir. Bu dosya yoksa yalın `make install` ikisini de boş derler ve venv ya da `TRUSTED_DIRS` komutları eşleşmez.
 
 Diğer hedefler: `make build`, `make test`, `make vet`, `make clean`.
 

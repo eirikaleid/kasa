@@ -25,7 +25,10 @@ Optional: after building and installing kasa, you may add the shell integration 
 kasa status        # locked or unlocked
 kasa ls            # key names only
 kasa profile ls    # profiles, their env var names and allowed commands
+kasa profile test <profile> -- <command> [args]   # dry run: allowed? (runs nothing, exit 1 if refused)
 ```
+
+An allow entry may pin the first arguments (`python3 ~/Developer/x/` allows only scripts below that directory); other arguments are still refused.
 
 ## Examples
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -21,6 +22,13 @@ import (
 //     path, or its symlink-resolved form, must be exactly this path.
 //   - allow entry is a bare name ("python3", "jq"): the basename must match
 //     AND the command must live in a trusted directory (guvenilenDizin).
+//
+// Pinned arguments: an entry that contains whitespace is split with
+// strings.Fields. The first token is the command (matched by the two rules
+// above); the others pin argv[1..n] (argumanSabitle). A bare "python3" entry
+// lets the agent run `python3 -c 'print(os.environ)'`; "python3 ~/dir/" lets it
+// run only scripts below that directory. Arguments after the pinned prefix are
+// free. Entries without whitespace behave exactly as before.
 //
 // Remaining race: the checked path is exec'd, but the symlink's target can be
 // swapped between the check and the exec. Exec'ing the resolved target would
@@ -111,42 +119,144 @@ func hedefGuvenilir(gercek, home string) bool {
 	return kok != "" && strings.HasPrefix(gercek, kok+"/")
 }
 
-// izinVer: may bin (the absolute path from komutCoz) run under this allow list?
-func izinVer(allow []string, bin, home string) (bool, string) {
-	base := filepath.Base(bin)
-	gercek, err := gercekYol(bin)
-	if err != nil {
-		return false, fmt.Sprintf("could not resolve %s: %v", bin, err)
-	}
-	adEslesti := false
-	for _, a := range allow {
-		if a == "*" {
-			return true, ""
+// komutEslesir: does one allow token (a bare name or an absolute path)
+// match bin? adEslesti: the bare name matched but the binary is not in a trusted
+// directory (for the error message).
+func komutEslesir(a, bin, gercek, base, home string) (eslesti, adEslesti bool) {
+	a = tildeAc(a, home)
+	if filepath.IsAbs(a) {
+		a = filepath.Clean(a)
+		if bin == a || gercek == a {
+			return true, false
 		}
-		a = tildeAc(a, home)
-		if filepath.IsAbs(a) {
-			a = filepath.Clean(a)
-			if bin == a || gercek == a {
-				return true, ""
-			}
-			if ag, err := gercekYol(a); err == nil && gercek == ag {
-				return true, ""
+		if ag, err := gercekYol(a); err == nil && gercek == ag {
+			return true, false
+		}
+		return false, false
+	}
+	if a == base {
+		return guvenilenDizin(bin, home) && hedefGuvenilir(gercek, home), true
+	}
+	return false, false
+}
+
+// yolTokeni: a pinned token that names a path ("/..." or "~/...") rather than plain text.
+func yolTokeni(t string) bool {
+	return strings.HasPrefix(t, "/") || strings.HasPrefix(t, "~/")
+}
+
+// argvGercek: the symlink-resolved path of an argv element, relative to cwd.
+// filepath.Abs is not used: it cleans ".." lexically, but the kernel resolves
+// ".." after following symlinks, and EvalSymlinks follows the kernel.
+func argvGercek(a string) (string, error) {
+	if !filepath.IsAbs(a) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		a = cwd + "/" + a
+	}
+	return filepath.EvalSymlinks(a)
+}
+
+// argumanSabitle: do the pinned tokens (an allow entry without its command)
+// match the start of args (argv without arg0)? Returns "" on a match, else the
+// reason. The reason never includes the argument value.
+//   - path token ending in "/": args[i] must be a regular file below that directory
+//   - other path token: args[i] must resolve to exactly that path
+//   - any other token: plain text, args[i] must be equal
+//
+// A path argument may not start with "-" (an interpreter would read it as an option).
+func argumanSabitle(tokenlar, args []string, home string) string {
+	for i, t := range tokenlar {
+		n := i + 1
+		if i >= len(args) {
+			return fmt.Sprintf("argument %d is missing (expected %q)", n, t)
+		}
+		a := args[i]
+		if !yolTokeni(t) {
+			if a != t {
+				return fmt.Sprintf("argument %d must be exactly %q", n, t)
 			}
 			continue
 		}
-		if a == base {
-			adEslesti = true
-			if guvenilenDizin(bin, home) && hedefGuvenilir(gercek, home) {
-				return true, ""
+		if a == "" || strings.HasPrefix(a, "-") {
+			return fmt.Sprintf("argument %d must be a path for %q, not empty or starting with '-'", n, t)
+		}
+		if strings.HasPrefix(t, "~/") && home == "" {
+			return fmt.Sprintf("%q cannot be expanded (no home directory)", t)
+		}
+		pin, err := gercekYol(tildeAc(t, home))
+		if err != nil {
+			return fmt.Sprintf("%q cannot be resolved: %v", t, err)
+		}
+		gercek, err := argvGercek(a)
+		if err != nil {
+			return fmt.Sprintf("argument %d does not resolve to an existing file: %v", n, err)
+		}
+		if !strings.HasSuffix(t, "/") {
+			if gercek != pin {
+				return fmt.Sprintf("argument %d must resolve to %q", n, t)
 			}
+			continue
+		}
+		if fi, err := os.Stat(gercek); err != nil || !fi.Mode().IsRegular() {
+			return fmt.Sprintf("argument %d must be a regular file below %q", n, t)
+		}
+		if !strings.HasPrefix(gercek, strings.TrimSuffix(pin, "/")+"/") {
+			return fmt.Sprintf("argument %d resolves outside %q", n, t)
 		}
 	}
+	return ""
+}
+
+// izinVer: may bin (the absolute path from komutCoz) run with args (argv
+// without arg0) under this allow list? On success it also returns the matching
+// entry (whitespace-normalized, for the audit log); on failure, the reason.
+func izinVer(allow []string, bin string, args []string, home string) (bool, string, string) {
+	base := filepath.Base(bin)
+	gercek, err := gercekYol(bin)
+	if err != nil {
+		return false, "", fmt.Sprintf("could not resolve %s: %v", bin, err)
+	}
+	adEslesti := false
+	var argRet []string
+	for _, a := range allow {
+		if a == "*" {
+			return true, a, ""
+		}
+		// An entry with one token (or none) is matched exactly as before, as the raw string.
+		tokenlar := strings.Fields(a)
+		if len(tokenlar) < 2 {
+			eslesti, ad := komutEslesir(a, bin, gercek, base, home)
+			if eslesti {
+				return true, a, ""
+			}
+			adEslesti = adEslesti || ad
+			continue
+		}
+		eslesti, ad := komutEslesir(tokenlar[0], bin, gercek, base, home)
+		adEslesti = adEslesti || ad
+		if !eslesti {
+			continue
+		}
+		girdi := strings.Join(tokenlar, " ")
+		if r := argumanSabitle(tokenlar[1:], args, home); r != "" {
+			argRet = append(argRet, fmt.Sprintf("entry %q: %s", girdi, r))
+			continue
+		}
+		return true, girdi, ""
+	}
+	if len(argRet) > 0 {
+		return false, "", fmt.Sprintf("'%s' is allowed only with pinned arguments, and none of them matched:\n  %s\n  to change it: kasa profile edit",
+			base, strings.Join(argRet, "\n  "))
+	}
 	if adEslesti {
-		return false, fmt.Sprintf("'%s' is in the allow list but %s (-> %s) is not in a trusted directory "+
+		return false, "", fmt.Sprintf("'%s' is in the allow list but %s (-> %s) is not in a trusted directory "+
 			"(system, homebrew, ~/.local/bin, pipx, and TRUSTED_DIRS / DEV_ROOT given at build time); "+
 			"if you need this path, put its absolute path in allow", base, bin, gercek)
 	}
-	return false, fmt.Sprintf("'%s' is not in this profile's allow list (%v)\n  to add it: kasa profile edit", base, allow)
+	return false, "", fmt.Sprintf("'%s' is not in this profile's allow list (%v)\n  to add it: kasa profile edit", base, allow)
 }
 
 // homeDir: for the trust boundary, the home directory comes from the account

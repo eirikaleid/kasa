@@ -37,7 +37,7 @@ kasa ls              # key names (no values), e.g. github/token
 kasa profile ls      # profiles: which env vars, which commands are allowed
 ```
 
-A profile lists the commands it allows (`allow`). If the command you need is not allowed, tell the human and let them decide; do not look for another way.
+A profile lists the commands it allows (`allow`). If the command you need is not allowed, tell the human and let them decide; do not look for another way. An entry can pin the first arguments (`python3 ~/Developer/x/`: only scripts below that directory). To check a command line without running it, use `kasa profile test <profile> -- <command> [args]` (read-only; exit 1 with the reason if it is refused).
 
 ## Examples
 

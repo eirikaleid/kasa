@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.0.0"
+const version = "2.1.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -113,6 +113,8 @@ func usage() {
   kasa mail send --profile <p> --to <address> --subject <s> [--body <m>|--body-file <f>]
 
   kasa profile ls | edit        profile definitions (~/.config/kasa/profiles.json)
+  kasa profile test <p> -- <cmd> [arg...]
+                                dry run: would "kasa run" allow it? (runs nothing, reads no secret)
   kasa audit [-n 30]            access log
 
   kasa target ls|add|rm         backup targets (directory: USB, disk, NAS, repo)
@@ -455,7 +457,8 @@ func cmdRun(args []string) error {
 		return err
 	}
 	base := filepath.Base(bin)
-	if ok, neden := izinVer(p.Allow, bin, homeDir()); !ok {
+	ok, eslesen, neden := izinVer(p.Allow, bin, cmdline[1:], homeDir())
+	if !ok {
 		audit("DENIED", "run", name, "command not allowed: "+bin)
 		return fmt.Errorf("%s", neden)
 	}
@@ -475,7 +478,8 @@ func cmdRun(args []string) error {
 	if len(atilan) > 0 {
 		audit("NOTE", "run", name, "dropped from environment: "+strings.Join(atilan, ","))
 	}
-	audit("OK", "run", name, base)
+	// Only the matching allow entry is logged, never the argument values.
+	audit("OK", "run", name, base+" ["+eslesen+"]")
 	// Replace the process via exec: the secret never leaves this process's memory.
 	return syscall.Exec(bin, cmdline, full)
 }
@@ -563,8 +567,32 @@ func cmdProfile(args []string) error {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	default:
-		return fmt.Errorf("usage: kasa profile [ls|edit|path]")
+		return fmt.Errorf("usage: kasa profile [ls|edit|path|test]")
 	}
+	return nil
+}
+
+// cmdProfileTest: dry run of the allow check in run. Runs nothing, reads no
+// secret and does not need the vault unlocked, so it is safe in an agent session.
+func cmdProfileTest(c *Config, args []string) error {
+	if len(args) < 3 || args[1] != "--" {
+		return fmt.Errorf("usage: kasa profile test <profile> -- <cmd> [arg...]")
+	}
+	p, err := c.get(args[0])
+	if err != nil {
+		return err
+	}
+	cmdline := args[2:]
+	bin, err := komutCoz(cmdline[0])
+	if err != nil {
+		return fmt.Errorf("denied: %w", err)
+	}
+	fmt.Println("path   :", bin)
+	ok, eslesen, neden := izinVer(p.Allow, bin, cmdline[1:], homeDir())
+	if !ok {
+		return fmt.Errorf("denied: %s", neden)
+	}
+	fmt.Println("allowed:", eslesen)
 	return nil
 }
 
