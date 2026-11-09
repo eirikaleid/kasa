@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -358,5 +360,247 @@ func TestProfilTest(t *testing.T) {
 	}
 	if _, err := calistir("p", py, betik); err == nil {
 		t.Fatal("expected a usage error without --")
+	}
+}
+
+func TestRiskliGirdi(t *testing.T) {
+	riskli := []string{
+		"python3", "python", "python3.13", "/usr/bin/python3", "Python3", "node", "deno", "bun",
+		"sh", "bash", "zsh", "dash", "ksh", "fish", "perl", "perl5.38.0", "ruby", "php", "lua5.4", "tclsh8.6", "Rscript", "osascript",
+		"uv", "uvx", "pipx", "npx", "npm", "pnpm", "yarn", "java",
+		"env", "xargs", "awk", "gawk", "find", "curl", "*",
+		"npm run", "pnpm --filter api eval", "uv run sistembir", "python3 -c", "  python3  ",
+		"python3 script.py", "/bin/sh -c",
+	}
+	for _, g := range riskli {
+		if !riskliGirdi(g) {
+			t.Errorf("%q should be risky", g)
+		}
+	}
+	risksiz := []string{
+		"", "gh", "git", "jq", "aws", "kubectl", "python3-config", "pythonista", "nodemon", "shellcheck",
+		"python3 ~/x/", "python3 -m pkg", "python3 -m", "sh ~/x/a.sh", "uv run --project ~/x sistembir",
+		"/usr/bin/python3 /opt/x/run.py", "python3.13 /opt/x/", "node /opt/x/app.js", "pnpm --dir /opt/x run",
+		"bash -m x", "* /opt/x/",
+	}
+	for _, g := range risksiz {
+		if riskliGirdi(g) {
+			t.Errorf("%q should not be risky", g)
+		}
+	}
+}
+
+// yakala runs fn with os.Stdout and os.Stderr redirected, and returns both.
+func yakala(t *testing.T, fn func()) (stdout, stderr string) {
+	t.Helper()
+	eskiO, eskiE := os.Stdout, os.Stderr
+	ro, wo, _ := os.Pipe()
+	re, we, _ := os.Pipe()
+	os.Stdout, os.Stderr = wo, we
+	defer func() { os.Stdout, os.Stderr = eskiO, eskiE }()
+	fn()
+	wo.Close()
+	we.Close()
+	bo, _ := io.ReadAll(ro)
+	be, _ := io.ReadAll(re)
+	return string(bo), string(be)
+}
+
+// profilEvi: a temporary home with the given user profiles, no locked file, an empty audit log.
+func profilEvi(t *testing.T, profiller map[string]Profile) string {
+	t.Helper()
+	d := kanonikTemp(t)
+	eskiEv, eskiK := testEvDizini, KilitliProfilYolu
+	testEvDizini, KilitliProfilYolu = d, filepath.Join(d, "yok.json")
+	t.Cleanup(func() { testEvDizini, KilitliProfilYolu = eskiEv, eskiK })
+	if err := saveConfig(&Config{Profiles: profiller}); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func auditOku(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(auditPath())
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestProfilLsRiskliUyari(t *testing.T) {
+	profilEvi(t, map[string]Profile{
+		"acik":  {Allow: []string{"gh", "python3", "npm run", "python3 ~/x/"}},
+		"temiz": {Allow: []string{"gh", "python3 ~/x/", "sh ~/x/a.sh"}},
+	})
+	out, _ := yakala(t, func() {
+		if err := cmdProfile([]string{"ls"}); err != nil {
+			t.Error(err)
+		}
+	})
+	const satir = `             warning: "python3", "npm run": interpreter entries, the profile's secrets can be exposed (pin them: "python3 ~/dir/")`
+	if strings.Count(out, "warning:") != 1 || !strings.Contains(out, satir+"\n") {
+		t.Fatalf("expected one warning line for the risky profile only:\n%s", out)
+	}
+	// The warning sits directly under the risky profile's own allow line.
+	if !strings.Contains(out, "allow : gh python3 npm run python3 ~/x/\n"+satir) {
+		t.Fatalf("warning is not under the risky profile's allow line:\n%s", out)
+	}
+}
+
+// A locked profile gets no warning (it only accepts absolute paths). A real
+// locked file needs root, so the locked state is set the way kilitliUygula does.
+func TestRiskliKilitliProfildeUyariYok(t *testing.T) {
+	p := Profile{Allow: []string{"/usr/bin/python3"}}
+	c := &Config{Profiles: map[string]Profile{"k": p, "u": p}, kullaniciAsli: map[string]*Profile{"k": nil}}
+	if riskliSatiri(c, "k", p) != "" {
+		t.Error("locked profile: ls warning expected to be empty")
+	}
+	if riskliSatiri(c, "u", p) == "" {
+		t.Error("unlocked profile: ls warning expected")
+	}
+	if _, e := yakala(t, func() {
+		if riskliUyar(c, "k", "/usr/bin/python3") {
+			t.Error("locked profile: riskliUyar reported a warning")
+		}
+	}); e != "" {
+		t.Errorf("locked profile wrote to stderr: %q", e)
+	}
+	if _, e := yakala(t, func() {
+		if !riskliUyar(c, "u", "/usr/bin/python3") {
+			t.Error("unlocked profile: riskliUyar reported no warning")
+		}
+	}); !strings.Contains(e, "warning") || !strings.HasSuffix(e, "\n") || strings.Count(e, "\n") != 1 {
+		t.Errorf("expected exactly one stderr line, got %q", e)
+	}
+}
+
+// The test goes through cmdProfile, the real dispatch: 2.1.0 shipped
+// cmdProfileTest without wiring the "test" subcommand, and a unit test that
+// called cmdProfileTest directly did not notice.
+func TestProfilTestDispatchUyariVeAudit(t *testing.T) {
+	d := kanonikTemp(t)
+	py := calistirilabilir(t, filepath.Join(d, "bin", "python3"))
+	dizin := filepath.Join(d, "proj")
+	betik := dosyaYaz(t, filepath.Join(dizin, "betik.py"))
+	pin := py + " " + dizin + "/"
+	profilEvi(t, map[string]Profile{
+		"riskli": {Allow: []string{py}},
+		"pinli":  {Allow: []string{pin}},
+	})
+	test := func(args ...string) (string, string, error) {
+		var err error
+		o, e := yakala(t, func() { err = cmdProfile(append([]string{"test"}, args...)) })
+		return o, e, err
+	}
+
+	// Allowed by a risky entry: warning on stderr, stdout stays the two lines.
+	o, e, err := test("riskli", "--", py)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o != "path   : "+py+"\nallowed: "+py+"\n" {
+		t.Errorf("stdout is not clean: %q", o)
+	}
+	if strings.Count(e, "\n") != 1 || !strings.Contains(e, "warning") || !strings.Contains(e, py) {
+		t.Errorf("expected a single warning line on stderr, got %q", e)
+	}
+
+	// Allowed by a pinned entry: no warning.
+	if o, e, err = test("pinli", "--", py, betik); err != nil || e != "" || !strings.Contains(o, "allowed: "+pin) {
+		t.Errorf("pinned entry: err=%v stderr=%q stdout=%q", err, e, o)
+	}
+
+	// Denied: nothing on stderr from the warning, and an error comes back.
+	const gizli = "ARGUMAN-DEGERI-GIZLI"
+	if _, e, err = test("pinli", "--", py, "-c", gizli); err == nil || !strings.Contains(err.Error(), "denied") || e != "" {
+		t.Errorf("expected a denial, got err=%v stderr=%q", err, e)
+	}
+	if _, _, err = test("pinli", "--", filepath.Join(d, "yok-komut")); err == nil {
+		t.Error("expected an error for a command that does not exist")
+	}
+
+	// Audit: OK with the entry, DENIED with a reason, never an argument value.
+	log := auditOku(t)
+	satirlar := strings.Split(strings.TrimRight(log, "\n"), "\n")
+	if len(satirlar) != 4 {
+		t.Fatalf("expected 4 audit lines, got %d:\n%s", len(satirlar), log)
+	}
+	beklenen := []struct{ sonuc, hedef, ayrinti string }{
+		{"OK", "riskli", py},
+		{"OK", "pinli", pin},
+		{"DENIED", "pinli", "command not allowed: " + py},
+		{"DENIED", "pinli", "not found: yok-komut"},
+	}
+	for i, b := range beklenen {
+		alanlar := strings.Split(satirlar[i], "\t")
+		if len(alanlar) != 6 || alanlar[1] != b.sonuc || alanlar[2] != "profile-test" || alanlar[3] != b.hedef || alanlar[5] != b.ayrinti {
+			t.Errorf("audit line %d: want %v, got %q", i, b, satirlar[i])
+		}
+	}
+	for _, yasak := range []string{gizli, "-c", betik} {
+		if strings.Contains(log, yasak) {
+			t.Errorf("audit log contains an argument value %q:\n%s", yasak, log)
+		}
+	}
+}
+
+// TestRunYardimci is not a test: it is the child process of TestRunUyari. It
+// calls cmdRun, which replaces the process with the allowed command.
+func TestRunYardimci(t *testing.T) {
+	ev := os.Getenv("KASA_TEST_RUN_EV")
+	if ev == "" {
+		t.Skip("child process of TestRunUyari")
+	}
+	testEvDizini, KilitliProfilYolu = ev, filepath.Join(ev, "yok.json")
+	testKeychainYolu = filepath.Join(ev, "kasa.keychain-db")
+	if err := cmdRun(flag.Args()); err != nil {
+		os.Stderr.WriteString("run error: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+}
+
+func TestRunUyari(t *testing.T) {
+	d := kanonikTemp(t)
+	py := calistirilabilir(t, filepath.Join(d, "bin", "python3"))
+	dizin := filepath.Join(d, "proj")
+	betik := dosyaYaz(t, filepath.Join(dizin, "betik.py"))
+	pin := py + " " + dizin + "/"
+	ev := profilEvi(t, map[string]Profile{
+		"riskli": {Allow: []string{py}},
+		"pinli":  {Allow: []string{pin}},
+	})
+	if err := os.WriteFile(filepath.Join(ev, "kasa.keychain-db"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	calistir := func(args ...string) (stdout, stderr string) {
+		cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestRunYardimci$", "--"}, args...)...)
+		cmd.Env = append(os.Environ(), "KASA_TEST_RUN_EV="+ev)
+		var o, e strings.Builder
+		cmd.Stdout, cmd.Stderr = &o, &e
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("kasa run %v: %v\nstdout: %s\nstderr: %s", args, err, o.String(), e.String())
+		}
+		return o.String(), e.String()
+	}
+
+	o, e := calistir("riskli", "--", py)
+	if o != "" || strings.Count(e, "\n") != 1 || !strings.Contains(e, "warning") {
+		t.Errorf("risky entry: want empty stdout and one stderr line, got stdout=%q stderr=%q", o, e)
+	}
+	if o, e = calistir("pinli", "--", py, betik); o != "" || e != "" {
+		t.Errorf("pinned entry: want no output, got stdout=%q stderr=%q", o, e)
+	}
+
+	// The warning does not touch the OK line; a separate NOTE names the entry.
+	log := auditOku(t)
+	if !strings.Contains(log, "\tNOTE\trun\triskli\t") || !strings.Contains(log, "\trisky allow entry: "+py+"\n") {
+		t.Errorf("missing NOTE line:\n%s", log)
+	}
+	if !strings.Contains(log, "\tOK\trun\triskli\t") || !strings.Contains(log, "\tpython3 ["+py+"]\n") {
+		t.Errorf("OK line changed:\n%s", log)
+	}
+	if strings.Count(log, "risky allow entry") != 1 {
+		t.Errorf("NOTE written for the pinned profile too:\n%s", log)
 	}
 }

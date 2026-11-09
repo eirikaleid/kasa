@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -257,6 +258,79 @@ func izinVer(allow []string, bin string, args []string, home string) (bool, stri
 			"if you need this path, put its absolute path in allow", base, bin, gercek)
 	}
 	return false, "", fmt.Sprintf("'%s' is not in this profile's allow list (%v)\n  to add it: kasa profile edit", base, allow)
+}
+
+// riskliKomutlar: programs that can run code of the agent's choosing (or, for
+// curl, read the environment), so an unpinned entry exposes the secrets.
+var riskliKomutlar = map[string]bool{
+	"python": true, "node": true, "deno": true, "bun": true,
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true,
+	"perl": true, "ruby": true, "php": true, "lua": true, "tclsh": true, "rscript": true, "osascript": true,
+	"uv": true, "uvx": true, "pipx": true, "npx": true, "npm": true, "pnpm": true, "yarn": true, "java": true,
+	"env": true, "xargs": true, "awk": true, "gawk": true, "find": true,
+	"curl": true, // 8.3+ reads the environment with `--variable %ENV`
+}
+
+// surumEki: version suffix of a program name (python3.13, perl5.38.0, python3.13t).
+var surumEki = regexp.MustCompile(`[-_]?[0-9]+(\.[0-9]+)*t?$`)
+
+// riskliGirdi: does this allow entry hand its profile's secrets to a program
+// that can run arbitrary code? True when the command (basename, lowercased,
+// version suffix removed) is on riskliKomutlar, or the entry is "*", and no
+// pinned argument is a path ("/..." or "~/...") or a plain "-m".
+func riskliGirdi(girdi string) bool {
+	tokenlar := strings.Fields(girdi)
+	if len(tokenlar) == 0 {
+		return false
+	}
+	ad := strings.ToLower(filepath.Base(tokenlar[0]))
+	if tokenlar[0] != "*" && !riskliKomutlar[surumEki.ReplaceAllString(ad, "")] {
+		return false
+	}
+	for _, t := range tokenlar[1:] {
+		if yolTokeni(t) {
+			return false
+		}
+	}
+	return !moduSabitli(girdi)
+}
+
+// kilitliProfil: is this profile from the root-owned locked file?
+func (c *Config) kilitliProfil(ad string) bool {
+	_, kilitli := c.kullaniciAsli[ad]
+	return kilitli
+}
+
+// riskliSatiri: the warning line `kasa profile ls` prints under an unlocked
+// profile with risky allow entries, or "" if there is nothing to warn about.
+func riskliSatiri(c *Config, ad string, p Profile) string {
+	if c.kilitliProfil(ad) {
+		return ""
+	}
+	var q []string
+	for _, a := range p.Allow {
+		if riskliGirdi(a) {
+			q = append(q, fmt.Sprintf("%q", strings.Join(strings.Fields(a), " ")))
+		}
+	}
+	if len(q) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("             warning: %s: interpreter entries, the profile's secrets can be exposed (pin them: \"python3 ~/dir/\")",
+		strings.Join(q, ", "))
+}
+
+// riskliUyar: for run and profile test. If the matching entry is risky and the
+// profile is not locked (a locked profile only accepts absolute paths), prints
+// one line to stderr, never stdout, and reports true. It never blocks. There
+// is deliberately no environment variable to silence it: an agent could set it.
+func riskliUyar(c *Config, profil, eslesen string) bool {
+	if c.kilitliProfil(profil) || !riskliGirdi(eslesen) {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "kasa: warning: allow entry %q in profile %s is an interpreter: "+
+		"the profile's secrets can be exposed (pin it: \"python3 ~/dir/\")\n", eslesen, profil)
+	return true
 }
 
 // homeDir: for the trust boundary, the home directory comes from the account

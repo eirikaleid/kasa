@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.1.0"
+const version = "2.2.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -480,6 +480,9 @@ func cmdRun(args []string) error {
 	}
 	full = sabitliOrtam(full, eslesen)
 	// Only the matching allow entry is logged, never the argument values.
+	if riskliUyar(c, name, eslesen) {
+		audit("NOTE", "run", name, "risky allow entry: "+eslesen)
+	}
 	audit("OK", "run", name, base+" ["+eslesen+"]")
 	// Replace the process via exec: the secret never leaves this process's memory.
 	return syscall.Exec(bin, cmdline, full)
@@ -553,6 +556,9 @@ func cmdProfile(args []string) error {
 			}
 			fmt.Printf("             secrets: %s\n", strings.Join(envs, " "))
 			fmt.Printf("             allow : %s\n", strings.Join(p.Allow, " "))
+			if w := riskliSatiri(c, name, p); w != "" {
+				fmt.Println(w)
+			}
 		}
 	case "path":
 		fmt.Println(configPath())
@@ -586,15 +592,21 @@ func cmdProfileTest(c *Config, args []string) error {
 		return err
 	}
 	cmdline := args[2:]
+	// Audited like run, so probing the allow rules leaves a trace. The detail
+	// is the matching entry or a fixed reason, never an argument value.
 	bin, err := komutCoz(cmdline[0])
 	if err != nil {
+		audit("DENIED", "profile-test", args[0], "not found: "+filepath.Base(cmdline[0]))
 		return fmt.Errorf("denied: %w", err)
 	}
 	fmt.Println("path   :", bin)
 	ok, eslesen, neden := izinVer(p.Allow, bin, cmdline[1:], homeDir())
 	if !ok {
+		audit("DENIED", "profile-test", args[0], "command not allowed: "+bin)
 		return fmt.Errorf("denied: %s", neden)
 	}
+	riskliUyar(c, args[0], eslesen)
+	audit("OK", "profile-test", args[0], eslesen)
 	fmt.Println("allowed:", eslesen)
 	return nil
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.0 — 2026-11-09
+
+- **Warning for risky `allow` entries.** In an unlocked profile (`~/.config/kasa/profiles.json`), an entry is risky when its command (basename, case-insensitive, version suffix removed: `python3.13` -> `python`) is `python`, `node`, `deno`, `bun`, a shell (`sh bash zsh dash ksh fish`), `perl`, `ruby`, `php`, `lua`, `tclsh`, `Rscript`, `osascript`, `uv`, `uvx`, `pipx`, `npx`, `npm`, `pnpm`, `yarn`, `java`, `env`, `xargs`, `awk`, `gawk`, `find`, `curl` or `*`, and none of its pinned arguments is a path (`/...`, `~/...`) or a plain `-m`. Examples: `python3`, `npm run`, `uv run name` warn; `python3 ~/x/`, `python3 -m pkg`, `uv run --project ~/x name`, `gh` do not.
+- `kasa profile ls` adds a `warning:` line under such a profile. `kasa run` and `kasa profile test` print one line to stderr when the matching entry is risky; stdout is not touched and the command is not blocked. Locked profiles are not checked. There is no environment variable to silence it.
+- Audit: `kasa run` writes `NOTE run <profile> risky allow entry: <entry>` next to the unchanged `OK` line.
+- **Fix:** `kasa profile test` is now audited like `run`: `OK profile-test <profile> <matching entry>` or `DENIED profile-test <profile> <reason>` (`command not allowed: <path>` or `not found: <name>`). Argument values are never logged. Before, an agent could probe the allow rules without a trace.
+- Tests: the `test` subcommand is now exercised through `cmdProfile` (2.1.0 shipped it unwired and a direct unit test missed it), and `kasa run` is tested end to end in a child process.
+- Docs: README (EN/TR), SECURITY.md (interpreters in `allow`), skill, `llms.txt`.
+
 ## 2.1.0 — 2026-11-09
 
 - **Pinned arguments in `allow`.** An entry with spaces is split into tokens: the first is the command (same rules as before), the rest pin argv[1..n]. A token that is an absolute or `~/` path ending in `/` is a directory pin (the argument must be a regular file below it, after symlink resolution, not starting with `-`; `../` and symlinks pointing outside are refused; `<dir>x` is not below `<dir>/`). A path token without a trailing `/` must match exactly. Any other token is plain text and must be equal (`python3 -m trend_radar.bildir`). Arguments after the pinned prefix are free. Too few arguments never match. Entries without spaces behave exactly as before. This closes `python3 -c 'print(os.environ)'` for profiles that allow an interpreter; it is a speed bump if the pinned script is user-writable (SECURITY.md).

@@ -28,7 +28,7 @@ kasa profile ls    # profiles, their env var names and allowed commands
 kasa profile test <profile> -- <command> [args]   # dry run: allowed? (runs nothing, exit 1 if refused)
 ```
 
-An allow entry may pin the first arguments (`python3 ~/Developer/x/` allows only scripts below that directory); other arguments are still refused.
+An allow entry may pin the first arguments (`python3 ~/Developer/x/` allows only scripts below that directory); other arguments are still refused. `kasa profile ls` prints a `warning:` line under a profile with a risky interpreter entry (`python3`, `npm run`, ... without a pinned path or `-m`), and `kasa run` / `kasa profile test` print one on stderr; it does not block. Tell the user, do not edit the profile yourself.
 
 ## Examples
 
