@@ -478,6 +478,7 @@ func cmdRun(args []string) error {
 	if len(atilan) > 0 {
 		audit("NOTE", "run", name, "dropped from environment: "+strings.Join(atilan, ","))
 	}
+	full = sabitliOrtam(full, eslesen)
 	// Only the matching allow entry is logged, never the argument values.
 	audit("OK", "run", name, base+" ["+eslesen+"]")
 	// Replace the process via exec: the secret never leaves this process's memory.

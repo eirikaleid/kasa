@@ -6,6 +6,41 @@ import (
 	"testing"
 )
 
+func TestSabitliOrtam(t *testing.T) {
+	p := Profile{Secrets: map[string]string{"TOKEN": "x/y"}}
+	// The caller sets PYTHONSAFEPATH=0: cocukOrtami must drop it, sabitliOrtam adds its own.
+	cagiran := []string{"HOME=/h", "PYTHONSAFEPATH=0"}
+	durumlar := []struct {
+		ad, eslesen string
+		var_        bool
+	}{
+		{"-m entry", "python3 -m trend_radar.bildir", true},
+		{"-m entry, absolute command", "/usr/bin/python3 -m modul", true},
+		{"script pin without -m", "python3 /opt/x/", false},
+		{"-m only as part of a token", "python3 -mmodul", false},
+		{"-m as a later plain token", "python3 /opt/x/run.py -m", true},
+		{"legacy bare entry", "python3", false},
+		{"wildcard", "*", false},
+		{"empty", "", false},
+	}
+	for _, d := range durumlar {
+		env, _ := cocukOrtami(cagiran, p, map[string]string{"TOKEN": "v"}, "/h")
+		env = sabitliOrtam(env, d.eslesen)
+		sayi := 0
+		for _, e := range env {
+			if strings.HasPrefix(e, "PYTHONSAFEPATH=") {
+				sayi++
+				if e != "PYTHONSAFEPATH=1" {
+					t.Errorf("%s: unexpected %s", d.ad, e)
+				}
+			}
+		}
+		if (sayi == 1) != d.var_ || sayi > 1 {
+			t.Errorf("%s: PYTHONSAFEPATH count=%d, expected present=%v", d.ad, sayi, d.var_)
+		}
+	}
+}
+
 func ortamHarita(env []string) map[string]string {
 	m := map[string]string{}
 	for _, e := range env {

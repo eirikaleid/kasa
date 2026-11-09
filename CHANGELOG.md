@@ -8,6 +8,7 @@
 - New `kasa profile test <profile> -- <cmd> [arg...]`: dry run of the allow check. Prints the path that would be exec'd and `allowed: <entry>`, or exits 1 with the reason. Runs nothing, reads no secret, works while locked and in an agent session.
 - Audit: the `OK run` note is now `command [matching allow entry]` (for example `python3 [python3 ~/Developer/x/]`); arguments are never logged.
 - Build: the Makefile includes an optional, git-ignored `local.mk` (see `local.mk.example`) so `TRUSTED_DIRS` and `DEV_ROOT` survive a plain `make install`. Values on the command line still win.
+- `-m` pins: when the matching entry has a plain `-m` token, `kasa run` adds `PYTHONSAFEPATH=1` to the child environment (after the `PYTHON*` drop, and only then), so `python3 -m pkg.mod` does not import from the agent-controlled working directory. The module must be installed in the interpreter's own site-packages; Python before 3.11 ignores the variable and is not protected.
 - Docs: README (EN/TR) allow section and build note, SECURITY.md interpreter entry, AGENTS.md, skill, `llms.txt`.
 
 ## 2.0.0 — 2026-11-09

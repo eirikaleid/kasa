@@ -111,6 +111,29 @@ func ortamGecerli(liste []string) error {
 	return nil
 }
 
+// moduSabitli: does the matching allow entry (from izinVer) pin a plain "-m"
+// token? Only the tokens after the command are looked at.
+func moduSabitli(eslesen string) bool {
+	tokenlar := strings.Fields(eslesen)
+	for _, t := range tokenlar[min(1, len(tokenlar)):] {
+		if t == "-m" {
+			return true
+		}
+	}
+	return false
+}
+
+// sabitliOrtam: `python3 -m pkg.mod` puts the working directory first on
+// sys.path, so an agent could run a fake pkg/mod.py from any directory.
+// PYTHONSAFEPATH=1 (Python 3.11+) stops that. It is added AFTER cocukOrtami,
+// which drops every PYTHON* name, and only for an entry that pins "-m".
+func sabitliOrtam(env []string, eslesen string) []string {
+	if moduSabitli(eslesen) {
+		return append(env, "PYTHONSAFEPATH=1")
+	}
+	return env
+}
+
 func ajanIsaretiMi(ad string) bool {
 	_, ok := ajanIsaretiAdi(ad)
 	return ok
