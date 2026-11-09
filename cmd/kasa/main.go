@@ -567,6 +567,8 @@ func cmdProfile(args []string) error {
 		cmd := exec.Command(ed, configPath())
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
+	case "test":
+		return cmdProfileTest(c, args[1:])
 	default:
 		return fmt.Errorf("usage: kasa profile [ls|edit|path|test]")
 	}
