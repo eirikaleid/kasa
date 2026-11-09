@@ -433,18 +433,17 @@ func TestProfilLsRiskliUyari(t *testing.T) {
 		"acik":  {Allow: []string{"gh", "python3", "npm run", "python3 ~/x/"}},
 		"temiz": {Allow: []string{"gh", "python3 ~/x/", "sh ~/x/a.sh"}},
 	})
-	out, _ := yakala(t, func() {
+	out, errOut := yakala(t, func() {
 		if err := cmdProfile([]string{"ls"}); err != nil {
 			t.Error(err)
 		}
 	})
-	const satir = `             warning: "python3", "npm run": interpreter entries, the profile's secrets can be exposed (pin them: "python3 ~/dir/")`
-	if strings.Count(out, "warning:") != 1 || !strings.Contains(out, satir+"\n") {
-		t.Fatalf("expected one warning line for the risky profile only:\n%s", out)
+	if strings.Contains(out, "warning") {
+		t.Fatalf("warning leaked into stdout:\n%s", out)
 	}
-	// The warning sits directly under the risky profile's own allow line.
-	if !strings.Contains(out, "allow : gh python3 npm run python3 ~/x/\n"+satir) {
-		t.Fatalf("warning is not under the risky profile's allow line:\n%s", out)
+	const satir = `             warning: "python3", "npm run": interpreter entries, the profile's secrets can be exposed (pin them: "python3 ~/dir/")`
+	if errOut != satir+"\n" {
+		t.Fatalf("expected exactly one warning line on stderr for the risky profile:\n%s", errOut)
 	}
 }
 

@@ -4,7 +4,7 @@
 
 Optional install step for agents: after building kasa, you may add `eval "$(kasa shell-init zsh)"` (bash: `bash`; fish: `kasa shell-init fish | source`; pwsh: `kasa shell-init pwsh | Out-String | Invoke-Expression`) to the user's shell rc file if it is not there yet, then check that `echo $KASA_HISTORY_GUARD` prints 1 in a new shell. It is an extra layer that keeps even rejected `kasa which` lines out of shell history; `kasa which` takes values only from a hidden prompt, so nothing depends on it.
 
-An allow entry can pin the first arguments (`python3 ~/Developer/x/`, `python3 -m module`) so an interpreter cannot run `-c` code; `kasa profile test <profile> -- <command> [args]` is a read-only dry run of that check. kasa warns (`kasa profile ls`, stderr of `run` and `profile test`) about interpreter entries in unlocked profiles that pin no path and no `-m`; it never blocks.
+An allow entry can pin the first arguments (`python3 ~/Developer/x/`, `python3 -m module`) so an interpreter cannot run `-c` code; `kasa profile test <profile> -- <command> [args]` is a read-only dry run of that check. kasa warns on stderr (`kasa profile ls`, `run`, `profile test`) about interpreter entries in unlocked profiles that pin no path and no `-m`; it never blocks.
 
 Key facts for agents: never ask the user to paste a secret; never call `kasa get`; exit code 75 means the keychain is locked and the human must run `kasa unlock`. The agent guard is best effort; real boundaries are the locked keychain, the agent's permission rules, and root-owned locked profiles.
 

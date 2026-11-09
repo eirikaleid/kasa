@@ -557,7 +557,7 @@ func cmdProfile(args []string) error {
 			fmt.Printf("             secrets: %s\n", strings.Join(envs, " "))
 			fmt.Printf("             allow : %s\n", strings.Join(p.Allow, " "))
 			if w := riskliSatiri(c, name, p); w != "" {
-				fmt.Println(w)
+				fmt.Fprintln(os.Stderr, w) // acceptance asks for stderr; keeps the stdout listing parseable
 			}
 		}
 	case "path":
