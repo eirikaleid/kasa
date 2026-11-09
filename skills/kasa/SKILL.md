@@ -17,7 +17,7 @@ description: Use when a command needs an API key, token, password or other crede
 
 ## Installing kasa
 
-After building and installing kasa, add the shell integration to the user's rc file, once (skip if `kasa shell-init` is already in it): zsh `~/.zshrc` and bash `~/.bashrc` get `eval "$(kasa shell-init zsh|bash)"`, fish `~/.config/fish/config.fish` gets `kasa shell-init fish | source`, pwsh `$PROFILE` gets `kasa shell-init pwsh | Out-String | Invoke-Expression`. Verify in a new shell that `echo $KASA_HISTORY_GUARD` prints `1`. `kasa shell-init` only prints code, so you may run it.
+Optional: after building and installing kasa, you may add the shell integration to the user's rc file, once (skip if `kasa shell-init` is already in it). It is an extra layer, not required (`kasa which` takes values only from a hidden prompt). zsh `~/.zshrc` and bash `~/.bashrc` get `eval "$(kasa shell-init zsh|bash)"`, fish `~/.config/fish/config.fish` gets `kasa shell-init fish | source`, pwsh `$PROFILE` gets `kasa shell-init pwsh | Out-String | Invoke-Expression`. If you add it, verify in a new shell that `echo $KASA_HISTORY_GUARD` prints `1`. `kasa shell-init` only prints code, so you may run it.
 
 ## Discover what exists
 

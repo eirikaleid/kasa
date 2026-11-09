@@ -14,7 +14,7 @@
 
 ## Installing kasa (for agents doing the install)
 
-After you build and install the binary (`make install`), add the shell integration to the user's shell rc file so `kasa which` command lines stay out of shell history. Add the line only if it is not already there (idempotent), for the shell the user runs:
+Optional: after you build and install the binary (`make install`), you may add the shell integration to the user's shell rc file. It is an extra layer that keeps even rejected `kasa which` lines out of shell history; it is not required, because `kasa which` takes values only from a hidden prompt. Add the line only if it is not already there (idempotent), for the shell the user runs:
 
 ```bash
 # zsh  (~/.zshrc)
@@ -27,7 +27,7 @@ grep -qF 'kasa shell-init' ~/.config/fish/config.fish 2>/dev/null || echo 'kasa 
 if (-not (Select-String -Path $PROFILE -SimpleMatch 'kasa shell-init' -Quiet -ErrorAction SilentlyContinue)) { Add-Content $PROFILE 'kasa shell-init pwsh | Out-String | Invoke-Expression' }
 ```
 
-Then verify in a new shell: `zsh -ic 'echo $KASA_HISTORY_GUARD'` (or the same with `bash`/`fish`) must print `1`. `kasa shell-init` only prints code and never reads secrets, so you may run it. Do not touch other lines of the rc file.
+If you add it, verify in a new shell: `zsh -ic 'echo $KASA_HISTORY_GUARD'` (or the same with `bash`/`fish`) prints `1`. `kasa shell-init` only prints code and never reads secrets, so you may run it. Do not touch other lines of the rc file.
 
 ## Finding out what is available
 

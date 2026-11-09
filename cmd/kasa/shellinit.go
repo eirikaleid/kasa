@@ -9,6 +9,8 @@ import (
 // kasa shell-init <shell>: stdout'a kabuk kodu basar. Kod `kasa which|lookup`
 // satirlarini (bastaki bosluk dahil) kabuk gecmisine yazdirmaz ve
 // KASA_HISTORY_GUARD=1 koyar. Salt statik metin: kasa/keychain'e dokunmaz.
+// Isteğe bagli ek katman: `kasa which` artik argumanla deger almadigi icin
+// guvence binary'dedir; bu kod yalniz reddedilen denemeyi gecmisten uzak tutar.
 
 var shellKodlari = map[string]string{
 	// Kullanicinin kendi zshaddhistory'sini ezmemek icin add-zsh-hook; regex
@@ -104,13 +106,4 @@ func cmdShellInit(args []string) error {
 	}
 	fmt.Print(kod)
 	return nil
-}
-
-// whichUyari: degerler argumandan geldiyse ve gecmis korumasi kurulu degilse
-// stderr'e basilacak uyari; yoksa "". Gizli istem yolunda (arguman yok) uyari yok.
-func whichUyari(argumanDegeri bool, guard string) string {
-	if !argumanDegeri || guard != "" {
-		return ""
-	}
-	return "warning: the value may be saved in your shell history; add `eval \"$(kasa shell-init zsh)\"` to your shell rc (see kasa shell-init)"
 }

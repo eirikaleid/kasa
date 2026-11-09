@@ -50,18 +50,6 @@ func TestKabukTahmin(t *testing.T) {
 	}
 }
 
-func TestWhichUyari(t *testing.T) {
-	if w := whichUyari(true, ""); !strings.HasPrefix(w, "warning:") || !strings.Contains(w, `eval "$(kasa shell-init zsh)"`) || strings.Contains(w, "\n") {
-		t.Errorf("arguman + guard yok: %q", w)
-	}
-	if w := whichUyari(true, "1"); w != "" {
-		t.Errorf("guard kurulu iken uyari: %q", w)
-	}
-	if w := whichUyari(false, ""); w != "" {
-		t.Errorf("gizli istemde uyari: %q", w)
-	}
-}
-
 func kabukCalistir(t *testing.T, bin string, args ...string) string {
 	t.Helper()
 	p, err := exec.LookPath(bin)

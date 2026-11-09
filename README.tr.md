@@ -50,9 +50,9 @@ kasa run github -- gh pr list
 }
 ```
 
-### Kabuk entegrasyonu (zorunlu adım)
+### Kabuk entegrasyonu (isteğe bağlı)
 
-`kasa which` / `kasa lookup` komut satırları kabuk geçmişine hiç yazılmasın (ve `kasa which` korumanın açık olduğunu bilsin) diye kabuğunun rc dosyasına tek satır ekle:
+`kasa which` değerleri yalnız gizli istemden alır ve argümanla verilen her değeri reddeder; bu yüzden entegrasyonu kursan da kurmasan da gizli bir şey kabuk geçmişine ya da `ps` çıktısına düşmez. Entegrasyon ek bir katmandır: reddedilen `kasa which ...` / `kasa lookup ...` satırlarını bile kabuk geçmişinden uzak tutar. Eklemek için kabuğunun rc dosyasına tek satır koy:
 
 | Kabuk | Eklenecek satır | Dosya |
 |---|---|---|
@@ -61,7 +61,7 @@ kasa run github -- gh pr list
 | fish | `kasa shell-init fish \| source` | `~/.config/fish/config.fish` |
 | PowerShell (`pwsh`) | `kasa shell-init pwsh \| Out-String \| Invoke-Expression` | `$PROFILE` |
 
-`kasa shell-init <kabuk>` yalnız kabuk kodu basar; keychain'e dokunmaz. Kod, `kasa which` ya da `kasa lookup` ile başlayan satırları (baştaki boşluk dahil) geçmişe yazdırmaz, var olan geçmiş kancanı ezmek yerine onunla zincirlenir ve `KASA_HISTORY_GUARD=1` koyar. Yeni bir kabuk açıp `echo $KASA_HISTORY_GUARD` çıktısının `1` olduğunu doğrula. kasa'nın kendisi yalnız macOS'tur; `pwsh` varyantı macOS'taki PowerShell ve ileride olası bir Windows desteği içindir. Fish'in `fish_should_add_to_history` kancasını çağıran bir sürümü gerekir; eski sürümlerde satır yine kaydedilir.
+`kasa shell-init <kabuk>` yalnız kabuk kodu basar; keychain'e dokunmaz. Kod, `kasa which` ya da `kasa lookup` ile başlayan satırları (baştaki boşluk dahil) geçmişe yazdırmaz, var olan geçmiş kancanı ezmek yerine onunla zincirlenir ve `KASA_HISTORY_GUARD=1` koyar. Denetlemek için yeni bir kabuk açıp `echo $KASA_HISTORY_GUARD` çalıştır; çıktı `1` olur. kasa'nın kendisi yalnız macOS'tur; `pwsh` varyantı macOS'taki PowerShell ve ileride olası bir Windows desteği içindir. Fish'in `fish_should_add_to_history` kancasını çağıran bir sürümü gerekir; eski sürümlerde satır yine kaydedilir.
 
 <p align="center">
   <img src="assets/terminal-demo.svg" alt="Terminal gösterimi: sır ekleme, anahtar listeleme, ajanda get reddi, ajanda run başarısı" width="900">
@@ -99,6 +99,8 @@ Ajan tarafındaki guard en iyi çabalı bir engeldir. Asıl sınırlar ayrı kil
     "deny": [
       "Bash(kasa get:*)",
       "Bash(kasa rm:*)",
+      "Bash(kasa which:*)",
+      "Bash(kasa lookup:*)",
       "Bash(kasa unlock:*)",
       "Bash(kasa import:*)",
       "Bash(security find-generic-password:*)"
@@ -131,8 +133,8 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa ls` | Anahtar adlarını listele (değer yok) | herkes |
 | `kasa get <ns/anahtar>` | Ham değeri yazdır | yalnız insan + TTY |
 | `kasa rm <ns/anahtar>` | Sırrı sil | yalnız insan + TTY |
-| `kasa which [bayraklar] <değer>...` | Değerin hangi anahtarda durduğunu bul; yalnız anahtar adlarını basar ([aşağıya](#değerden-anahtar-bulma) bakın) | yalnız insan + TTY |
-| `kasa shell-init <zsh\|bash\|fish\|pwsh>` | `kasa which` satırlarını kabuk geçmişinden uzak tutan kabuk kodunu bas ([Kabuk entegrasyonu](#kabuk-entegrasyonu-zorunlu-adım)) | herkes |
+| `kasa which [bayraklar]` | Değerin hangi anahtarda durduğunu bul (değerler gizli istemden alınır); yalnız anahtar adlarını basar ([aşağıya](#değerden-anahtar-bulma) bakın) | yalnız insan + TTY |
+| `kasa shell-init <zsh\|bash\|fish\|pwsh>` | `kasa which` satırlarını kabuk geçmişinden uzak tutan kabuk kodunu bas (isteğe bağlı, [Kabuk entegrasyonu](#kabuk-entegrasyonu-isteğe-bağlı)) | herkes |
 | `kasa run <profil> -- <komut> [argümanlar]` | Allow listesindeki komutu profilin sırlarıyla (env) çalıştır | herkes |
 | `kasa mail send --profile <p> --to <adres> --subject <s> [--body <m> \| --body-file <f>]` | Profilin SMTP ayarıyla posta gönder | herkes |
 | `kasa profile ls \| edit \| path` | Profil dosyasını göster, düzenle, yolunu yazdır | herkes |
@@ -152,15 +154,13 @@ Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pas
 `kasa which` (takma ad `lookup`), elindeki bir değerin kasada hangi anahtar(lar)da durduğunu söyler; yapay zekaya yalnız anahtar adını verirsin. Değerler `kasa` süreci içinde karşılaştırılır ve asla basılmaz; çıktı yalnız eşleşen anahtar adlarıdır (satır başına bir, sıralı). Yalnız insan + TTY.
 
 ```bash
-kasa which berke123                         # tam eşleşme (harf duyarlı, sabit zamanlı karşılaştırma)
-kasa which -i berke sezen --contains        # değerlerden biri herhangi bir yerde geçsin, harf duyarsız
-kasa which --all berke sezen --contains     # HER İKİ değer de geçsin
-kasa which -e '^berke\d+$'                  # düzenli ifade (Go RE2), değerin herhangi bir yerinde eşleşir
-kasa which -- -tireli-deger                 # -- sonrasının hepsi değerdir
-kasa which                                  # değer verilmezse gizli istemle sorulur
+kasa which                    # tam eşleşme (harf duyarlı, sabit zamanlı karşılaştırma)
+kasa which -i --contains      # herhangi bir yerde geçsin, harf duyarsız
+kasa which --all --contains   # iki değer sorar: HER İKİSİ de geçsin
+kasa which -e                 # her değer bir düzenli ifadedir (Go RE2), değerin herhangi bir yerinde eşleşir
 ```
 
-Bayraklar değerlerden önce ya da sonra gelebilir.
+Değerler asla argüman değildir. `kasa which` onları gizli istemden (echo'suz) sorar: `Value 1 (empty line to finish): `, `Value 2 (...)` ve böyle sürer; boş satır listeyi bitirir. Birden çok değerde herhangi biri eşleşebilir (`--all`: hepsi eşleşmeli). Bayrak olmayan bir argüman, `--` ya da bilinmeyen bayrak, yazdığını yansıtmayan bir hatayla reddedilir.
 
 | Bayrak | Anlamı |
 |---|---|
@@ -171,7 +171,7 @@ Bayraklar değerlerden önce ya da sonra gelebilir.
 
 Çıktı stdout'a gider. Eşleşme yoksa stdout boş kalır, stderr'e `no match` yazılır ve çıkış kodu 1 olur. Okunamayan anahtarlar stderr'de `unreadable: <ad>` olarak listelenir. Denetim günlüğüne yalnız kip ve sayılar yazılır; değer ya da desen asla.
 
-> **Uyarı:** argümanla verilen değer shell geçmişine düşer ve kısa süre `ps` çıktısında görünür. [Kabuk entegrasyonunu](#kabuk-entegrasyonu-zorunlu-adım) kur (`eval "$(kasa shell-init zsh)"` vb.) ki bu satırlar kaydedilmesin, ya da `kasa which`'i değer vermeden çalıştır (gizli istem). Entegrasyon etkin değilse (`KASA_HISTORY_GUARD` boş) `kasa which` stderr'e tek satır uyarı basar; sonuç yine yazılır.
+> **Neden:** komut satırındaki bir değer kabuk geçmişine, `ps` çıktısına ve yapay zekâ sohbet kayıtlarına düşerdi. Bu yüzden binary değerleri yalnız gizli istemden kabul eder. Yine de bir değeri argüman olarak yazdıysan, yazdığın satır kabuk geçmişine düşmüş olabilir; hata mesajı bunu söyler. Geçersiz `--regex` deseni `invalid regex (pattern not shown)` olarak bildirilir.
 
 ## Profiller
 

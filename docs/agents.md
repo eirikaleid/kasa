@@ -13,7 +13,7 @@ The same text is in [AGENTS.md](../AGENTS.md).
 
 ## Installing kasa on a machine (agent doing the install)
 
-After `make install`, add the shell integration to the user's shell rc file, once: zsh `~/.zshrc` and bash `~/.bashrc` get `eval "$(kasa shell-init zsh)"` / `eval "$(kasa shell-init bash)"`, fish `~/.config/fish/config.fish` gets `kasa shell-init fish | source`, PowerShell `$PROFILE` gets `kasa shell-init pwsh | Out-String | Invoke-Expression`. Skip it if the file already contains `kasa shell-init`. Verify in a new shell that `echo $KASA_HISTORY_GUARD` prints `1`. The full idempotent commands are in [AGENTS.md](../AGENTS.md#installing-kasa-for-agents-doing-the-install).
+Optional: after `make install`, you may add the shell integration to the user's shell rc file, once. It is an extra layer, not required (`kasa which` takes values only from a hidden prompt). zsh `~/.zshrc` and bash `~/.bashrc` get `eval "$(kasa shell-init zsh)"` / `eval "$(kasa shell-init bash)"`, fish `~/.config/fish/config.fish` gets `kasa shell-init fish | source`, PowerShell `$PROFILE` gets `kasa shell-init pwsh | Out-String | Invoke-Expression`. Skip it if the file already contains `kasa shell-init`. If you add it, verify in a new shell that `echo $KASA_HISTORY_GUARD` prints `1`. The full idempotent commands are in [AGENTS.md](../AGENTS.md#installing-kasa-for-agents-doing-the-install).
 
 ## Claude Code
 

@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "1.2.0"
+const version = "2.0.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -104,9 +104,9 @@ func usage() {
   kasa ls                       list keys (never shows values)
   kasa get <ns/key>             print the raw value  [human + TTY only]
   kasa rm  <ns/key>             delete               [human + TTY only]
-  kasa which [flags] <value>... find which key holds a value; prints key names only  [human + TTY only]
+  kasa which [flags]            find which key holds a value (values come from a hidden prompt); prints key names only  [human + TTY only]
 
-  kasa shell-init <shell>       print shell code that keeps "kasa which" out of history: zsh|bash|fish|pwsh
+  kasa shell-init <shell>       optional: print shell code that keeps "kasa which" out of history: zsh|bash|fish|pwsh
                                 use: eval "$(kasa shell-init zsh)" in your shell rc
 
   kasa run <profile> -- <cmd>   run a command with the profile's secrets as env vars

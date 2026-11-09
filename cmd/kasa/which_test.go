@@ -72,35 +72,74 @@ func TestEslesirKisaSorgu(t *testing.T) {
 
 func TestWhichAyristir(t *testing.T) {
 	tablo := []struct {
-		ad       string
-		args     []string
-		kip      whichKip
-		degerler []string
+		ad   string
+		args []string
+		kip  whichKip
 	}{
-		{"deger", []string{"berke123"}, whichKip{}, []string{"berke123"}},
-		{"deger sonra bayrak", []string{"berke123", "--contains"}, whichKip{Contains: true}, []string{"berke123"}},
-		{"bayrak once", []string{"--contains", "berke"}, whichKip{Contains: true}, []string{"berke"}},
-		{"-i coklu deger", []string{"-i", "berke", "sezen", "--contains"}, whichKip{IgnoreCase: true, Contains: true}, []string{"berke", "sezen"}},
-		{"bayrak ortada", []string{"berke", "-i", "sezen"}, whichKip{IgnoreCase: true}, []string{"berke", "sezen"}},
-		{"uzun bayraklar", []string{"--ignore-case", "--prefix", "--suffix", "x"}, whichKip{IgnoreCase: true, Prefix: true, Suffix: true}, []string{"x"}},
-		{"--all", []string{"--all", "a", "b", "--contains"}, whichKip{All: true, Contains: true}, []string{"a", "b"}},
-		{"-e deger yutmaz", []string{"-e", "^a$"}, whichKip{Regex: true}, []string{"^a$"}},
-		{"--regex", []string{"^a$", "--regex"}, whichKip{Regex: true}, []string{"^a$"}},
-		{"-- sonrasi tireli deger", []string{"--", "-i"}, whichKip{}, []string{"-i"}},
-		{"-- sonrasi bayrak da deger", []string{"--contains", "--", "--contains", "-x"}, whichKip{Contains: true}, []string{"--contains", "-x"}},
-		{"tek tire deger", []string{"-"}, whichKip{}, []string{"-"}},
-		{"deger yok", nil, whichKip{}, nil},
+		{"bayraksiz", nil, whichKip{}},
+		{"-i --contains", []string{"-i", "--contains"}, whichKip{IgnoreCase: true, Contains: true}},
+		{"uzun bayraklar", []string{"--ignore-case", "--prefix", "--suffix"}, whichKip{IgnoreCase: true, Prefix: true, Suffix: true}},
+		{"--all --contains", []string{"--all", "--contains"}, whichKip{All: true, Contains: true}},
+		{"-e", []string{"-e"}, whichKip{Regex: true}},
+		{"--regex", []string{"--regex"}, whichKip{Regex: true}},
 	}
 	for _, c := range tablo {
-		k, d, err := whichAyristir(c.args)
-		if err != nil || k != c.kip || strings.Join(d, "\x00") != strings.Join(c.degerler, "\x00") || len(d) != len(c.degerler) {
-			t.Errorf("%s: %v -> %+v %q %v; beklenen %+v %q", c.ad, c.args, k, d, err, c.kip, c.degerler)
+		k, err := whichAyristir(c.args)
+		if err != nil || k != c.kip {
+			t.Errorf("%s: %v -> %+v %v; beklenen %+v", c.ad, c.args, k, err, c.kip)
 		}
 	}
-	for _, kotu := range [][]string{{"--bilinmeyen"}, {"-x", "deger"}, {"--prefix=abc"}, {"deger", "-ie"}} {
-		if _, _, err := whichAyristir(kotu); err == nil || !strings.Contains(err.Error(), "usage") {
+}
+
+// Konumsal deger, `--` ve bilinmeyen bayrak reddedilir; hata metni girdiyi
+// (kismen bile) icermez.
+func TestWhichAyristirDegerReddedilir(t *testing.T) {
+	for _, kotu := range [][]string{
+		{"SIR-degeri-123"},
+		{"-i", "SIR-degeri-123"},
+		{"SIR-degeri-123", "--contains"},
+		{"-"},
+		{"--", "SIR-degeri-123"},
+		{"--", "-i"},
+		{"-SIR-degeri-123"},
+		{"--SIR-degeri-123=x"},
+		{"--prefix=SIR-degeri-123"},
+		{"-ie"},
+	} {
+		_, err := whichAyristir(kotu)
+		if err == nil || !strings.Contains(err.Error(), "usage") {
 			t.Errorf("%v kabul edildi / kullanim yok: %v", kotu, err)
+			continue
 		}
+		if strings.Contains(err.Error(), "SIR-degeri") {
+			t.Errorf("%v: hata metni degeri iceriyor: %v", kotu, err)
+		}
+	}
+}
+
+func TestWhichDegerleriOku(t *testing.T) {
+	girdi := []string{"berke", "sezen", ""}
+	var etiketler []string
+	prompt := func(label string) (string, error) {
+		etiketler = append(etiketler, label)
+		v := girdi[0]
+		girdi = girdi[1:]
+		return v, nil
+	}
+	got, err := whichDegerleriOku(prompt)
+	if err != nil || strings.Join(got, ",") != "berke,sezen" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+	if strings.Join(etiketler, "|") != "Value 1 (empty line to finish): |Value 2 (empty line to finish): |Value 3 (empty line to finish): " {
+		t.Errorf("etiketler: %q", etiketler)
+	}
+	// Ilk satir bos: hata.
+	if _, err := whichDegerleriOku(func(string) (string, error) { return "", nil }); err == nil || !strings.Contains(err.Error(), "search value is empty") {
+		t.Errorf("bos ilk deger: %v", err)
+	}
+	// Okuma hatasi yayilir.
+	if _, err := whichDegerleriOku(func(string) (string, error) { return "", errors.New("no tty") }); err == nil {
+		t.Error("okuma hatasi yutuldu")
 	}
 }
 
@@ -176,11 +215,14 @@ func TestSorguRegex(t *testing.T) {
 }
 
 func TestYeniSorguHatalar(t *testing.T) {
-	if _, err := yeniSorgu(whichKip{Regex: true}, []string{"(ab"}); err == nil || !strings.Contains(err.Error(), "invalid regex") || !strings.Contains(err.Error(), "(ab") {
-		t.Errorf("gecersiz regex: %v", err)
-	}
-	if _, err := yeniSorgu(whichKip{Regex: true, IgnoreCase: true}, []string{"(ab"}); err == nil || strings.Contains(err.Error(), "(?i)") {
-		t.Errorf("-i gecersiz regex mesaji katlanmis desen gosteriyor: %v", err)
+	for _, k := range []whichKip{{Regex: true}, {Regex: true, IgnoreCase: true}} {
+		_, err := yeniSorgu(k, []string{"SIR(degeri"})
+		if err == nil || err.Error() != "invalid regex (pattern not shown)" {
+			t.Errorf("%+v: gecersiz regex mesaji sabit degil: %v", k, err)
+		}
+		if err != nil && (strings.Contains(err.Error(), "SIR") || strings.Contains(err.Error(), "(?i)") || strings.Contains(err.Error(), "missing")) {
+			t.Errorf("%+v: regex hatasi desen/ayrinti sizdiriyor: %v", k, err)
+		}
 	}
 	for _, k := range []whichKip{{Regex: true, Contains: true}, {Regex: true, Prefix: true}, {Regex: true, Suffix: true}} {
 		if _, err := yeniSorgu(k, []string{"a"}); err == nil || !strings.Contains(err.Error(), "--regex") {
@@ -238,5 +280,20 @@ func TestWhichAjandaReddedilir(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "DENIED\twhich\t-\t") {
 		t.Errorf("audit DENIED satiri yok:\n%s", b)
+	}
+}
+
+// Ajan/TTY'siz ortamda konumsal deger de reddedilir ve hata metni degeri
+// icermez (requireHuman her seyden once calisir). TTY'li yol, whichAyristir'in
+// TestWhichAyristirDegerReddedilir'deki reddiyle kapsanir.
+func TestWhichKonumsalDegerHatasiDegeriIcermez(t *testing.T) {
+	t.Setenv("CLAUDECODE", "1")
+	err := cmdWhich([]string{"SIR-degeri-123"})
+	if err == nil || strings.Contains(err.Error(), "SIR-degeri") {
+		t.Fatalf("hata degeri iceriyor ya da yok: %v", err)
+	}
+	b, _ := os.ReadFile(auditPath())
+	if strings.Contains(string(b), "SIR-degeri") {
+		t.Errorf("audit degeri iceriyor:\n%s", b)
 	}
 }

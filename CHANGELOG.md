@@ -1,8 +1,15 @@
 # Changelog
 
+## 2.0.0 — 2026-11-09
+
+- **BREAKING:** `kasa which` (alias `lookup`) no longer accepts values as arguments. Values are read only from a hidden prompt (no echo, TTY): `Value 1 (empty line to finish): `, `Value 2 ...`; an empty first line is `search value is empty`. Any argument that is not a flag, `--`, and unknown flags are rejected before the keychain is touched; the error and the audit note never contain what was typed. Flags stay as arguments (`-i`, `--prefix`, `--suffix`, `--contains`, `-e`/`--regex`, `--all`). Old command lines that passed the value (including after `--`) no longer work; run `kasa which` and type the value at the prompt.
+- An invalid `--regex` pattern now reports the fixed message `invalid regex (pattern not shown)` instead of echoing the pattern and the regexp parser error.
+- Removed the `kasa which` warning about `KASA_HISTORY_GUARD` (no longer needed). `kasa shell-init` stays as an optional extra layer; docs and agent install steps no longer call it required.
+- README (EN/TR): the Claude Code example deny list now includes `Bash(kasa which:*)` and `Bash(kasa lookup:*)`.
+
 ## 1.2.0 — 2026-11-06
 
-- `kasa which` (alias `lookup`) now takes the values as arguments: `kasa which berke123`, `kasa which -i berke sezen --contains`. Flags may come before or after the values; everything after `--` is a value. Without any value the old hidden prompt is used.
+- `kasa which` (alias `lookup`) took the values as arguments (replaced in 2.0.0 by prompt-only input). Flags could come before or after the values; everything after `--` was a value. Without any value the hidden prompt was used.
 - New `-e`/`--regex` (Go RE2, matched anywhere in the value; with `-i` literal text is folded and escapes like `\D` are kept) and `--all` (all values must match; default is any).
 - Removed the 4-character minimum for partial modes; an empty value is still an error.
 - Output is now only the matching key names, sorted, one per line (no header, count or profile info). No match: empty stdout, `no match` on stderr, exit 1. Unreadable keys: `unreadable: <name>` on stderr.

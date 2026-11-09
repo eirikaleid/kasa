@@ -11,10 +11,12 @@ import (
 	"strings"
 )
 
-// kasa which: degerden anahtar adina ters arama. Aranan degerler argumandan
-// (ya da hic verilmezse gizli istemden) alinir; cikti yalniz anahtar adlari.
-// Deger okuma tek surecte yapilir (alt surec olarak `kasa get` cagrilmaz).
-// Arguman shell gecmisine ve kisa sure `ps` ciktisina duser (README'de uyari var).
+// kasa which: degerden anahtar adina ters arama. Aranan degerler YALNIZ gizli
+// istemden alinir; cikti yalniz anahtar adlari. Deger okuma tek surecte yapilir
+// (alt surec olarak `kasa get` cagrilmaz). Arguman olarak deger kabul edilmez:
+// kabuk gecmisine, `ps` ciktisina ve yapay zeka sohbet kaydina dusmesin diye
+// guvence kabuk kurulumuna degil binary'ye baglidir. Hata mesajlari da hicbir
+// girdiyi (deger, bilinmeyen bayrak, regex deseni) geri yansitmaz.
 
 // errEslesmeYok: eslesme yok; main sessizce 1 ile cikar ("no match" stderr'e basildi).
 var errEslesmeYok = errors.New("eslesme yok")
@@ -138,16 +140,13 @@ func yeniSorgu(k whichKip, degerler []string) (*whichSorgu, error) {
 		if !k.Regex {
 			continue
 		}
-		// Hata mesaji ham deseni gostersin (katlanmis (?i) halini degil).
-		if _, err := regexp.Compile(d); err != nil {
-			return nil, fmt.Errorf("invalid regex %q: %w", d, err)
-		}
 		if k.IgnoreCase {
 			d = "(?i)" + desenKatla(d)
 		}
+		// Sabit mesaj: regexp hatasi desen parcasi tasir, %w de eklenmez.
 		re, err := regexp.Compile(d)
 		if err != nil {
-			return nil, fmt.Errorf("invalid regex: %w", err)
+			return nil, fmt.Errorf("invalid regex (pattern not shown)")
 		}
 		q.desenler = append(q.desenler, re)
 	}
@@ -173,22 +172,15 @@ func (q *whichSorgu) esles(v string) bool {
 	return q.kip.All
 }
 
-const whichKullanim = "usage: kasa which [flags] <value>...\nflags: -i/--ignore-case  --prefix  --suffix  --contains  -e/--regex  --all  (-- ends flags)"
+const whichKullanim = "usage: kasa which [flags]\nflags: -i/--ignore-case  --prefix  --suffix  --contains  -e/--regex  --all"
 
-// whichAyristir: bayraklar konumdan bagimsiz; `--` sonrasi her sey deger.
-// Hepsi boolean (-e deger yutmaz); bilinmeyen bayrak hata.
-func whichAyristir(args []string) (whichKip, []string, error) {
+// whichAyristir: yalniz bayraklar; konumdan bagimsiz, hepsi boolean. Bayrak
+// olmayan her arguman (ve `--` ile bilinmeyen bayraklar) reddedilir; hata
+// metni girdiyi ASLA icermez: yazilan satir zaten kabuk gecmisinde olabilir.
+func whichAyristir(args []string) (whichKip, error) {
 	var k whichKip
-	var degerler []string
-	bayrakBitti := false
 	for _, a := range args {
-		if bayrakBitti || !strings.HasPrefix(a, "-") || a == "-" {
-			degerler = append(degerler, a)
-			continue
-		}
 		switch a {
-		case "--":
-			bayrakBitti = true
 		case "-i", "--ignore-case":
 			k.IgnoreCase = true
 		case "--prefix":
@@ -202,10 +194,34 @@ func whichAyristir(args []string) (whichKip, []string, error) {
 		case "--all":
 			k.All = true
 		default:
-			return k, nil, fmt.Errorf("unknown flag: %s\n%s", a, whichKullanim)
+			if !strings.HasPrefix(a, "-") || a == "-" {
+				return k, fmt.Errorf("kasa which does not take values as arguments (the argument is not shown).\n" +
+					"Values are read from a hidden prompt; the line you typed may already be in your shell history.\n" + whichKullanim)
+			}
+			return k, fmt.Errorf("unknown flag (not shown)\n%s", whichKullanim)
 		}
 	}
-	return k, degerler, nil
+	return k, nil
+}
+
+// whichDegerleriOku: degerleri gizli istemden (echo'suz) okur; bos satir
+// bitirir. prompt test icin disaridan verilir.
+func whichDegerleriOku(prompt func(label string) (string, error)) ([]string, error) {
+	var degerler []string
+	for i := 1; ; i++ {
+		v, err := prompt(fmt.Sprintf("Value %d (empty line to finish): ", i))
+		if err != nil {
+			return nil, err
+		}
+		if v == "" {
+			break
+		}
+		degerler = append(degerler, v)
+	}
+	if len(degerler) == 0 {
+		return nil, fmt.Errorf("search value is empty")
+	}
+	return degerler, nil
 }
 
 // whichTara: anahtarlari okuyup eslesen anahtar adlarini siralı stdout'a, okunamayanlari
@@ -239,27 +255,21 @@ func cmdWhich(args []string) error {
 	if err := requireHuman("which", "-"); err != nil {
 		return err
 	}
-	k, degerler, err := whichAyristir(args)
+	k, err := whichAyristir(args)
 	if err != nil {
+		audit("DENIED", "which", "-", "argument rejected (values are prompt-only)")
 		return err
 	}
 	if err := requireKasa(); err != nil {
 		return err
 	}
-	argumanla := len(degerler) > 0
-	if !argumanla {
-		aranan, err := promptSecret("Value to find: ")
-		if err != nil {
-			return err
-		}
-		degerler = []string{aranan}
+	degerler, err := whichDegerleriOku(promptSecret)
+	if err != nil {
+		return err
 	}
 	q, err := yeniSorgu(k, degerler)
 	if err != nil {
 		return err
-	}
-	if w := whichUyari(argumanla, os.Getenv("KASA_HISTORY_GUARD")); w != "" {
-		fmt.Fprintln(os.Stderr, w)
 	}
 	keys, err := kcList()
 	if err != nil {

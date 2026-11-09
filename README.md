@@ -50,9 +50,9 @@ Make sure `~/.local/bin` is on your `PATH`. A minimal `~/.config/kasa/profiles.j
 }
 ```
 
-### Shell integration (required step)
+### Shell integration (optional)
 
-Add one line to your shell rc file so that `kasa which` / `kasa lookup` command lines never reach your shell history (and so `kasa which` knows the guard is active):
+`kasa which` takes its values only from a hidden prompt and rejects any value given as an argument, so nothing secret reaches your shell history or `ps` whether or not you install this. The integration is an extra layer: it keeps even the rejected `kasa which ...` / `kasa lookup ...` lines out of your shell history. To add it, put one line in your shell rc file:
 
 | Shell | Line to add | File |
 |---|---|---|
@@ -61,7 +61,7 @@ Add one line to your shell rc file so that `kasa which` / `kasa lookup` command 
 | fish | `kasa shell-init fish \| source` | `~/.config/fish/config.fish` |
 | PowerShell (`pwsh`) | `kasa shell-init pwsh \| Out-String \| Invoke-Expression` | `$PROFILE` |
 
-`kasa shell-init <shell>` only prints shell code; it does not touch the keychain. The code skips history for lines starting with `kasa which` or `kasa lookup` (leading space included), chains with any history hook you already have instead of replacing it, and sets `KASA_HISTORY_GUARD=1`. Open a new shell and check `echo $KASA_HISTORY_GUARD` prints `1`. kasa itself is macOS-only; the `pwsh` variant is for PowerShell on macOS and for a possible Windows port later. Fish needs a version that calls `fish_should_add_to_history`; on older versions the line is still saved.
+`kasa shell-init <shell>` only prints shell code; it does not touch the keychain. The code skips history for lines starting with `kasa which` or `kasa lookup` (leading space included), chains with any history hook you already have instead of replacing it, and sets `KASA_HISTORY_GUARD=1`. To check it, open a new shell and run `echo $KASA_HISTORY_GUARD`; it prints `1`. kasa itself is macOS-only; the `pwsh` variant is for PowerShell on macOS and for a possible Windows port later. Fish needs a version that calls `fish_should_add_to_history`; on older versions the line is still saved.
 
 <p align="center">
   <img src="assets/terminal-demo.svg" alt="Terminal demo: add a secret, list keys, agent get is denied, agent run succeeds" width="900">
@@ -99,6 +99,8 @@ The agent-side guard is a best-effort speed bump. The real boundaries are the se
     "deny": [
       "Bash(kasa get:*)",
       "Bash(kasa rm:*)",
+      "Bash(kasa which:*)",
+      "Bash(kasa lookup:*)",
       "Bash(kasa unlock:*)",
       "Bash(kasa import:*)",
       "Bash(security find-generic-password:*)"
@@ -131,8 +133,8 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa ls` | List key names (no values) | anyone |
 | `kasa get <ns/key>` | Print the raw value | human + TTY only |
 | `kasa rm <ns/key>` | Delete a secret | human + TTY only |
-| `kasa which [flags] <value>...` | Find which key holds a value; prints key names only (see [below](#finding-a-key-from-a-value)) | human + TTY only |
-| `kasa shell-init <zsh\|bash\|fish\|pwsh>` | Print shell code that keeps `kasa which` out of shell history (see [Shell integration](#shell-integration-required-step)) | anyone |
+| `kasa which [flags]` | Find which key holds a value (values come from a hidden prompt); prints key names only (see [below](#finding-a-key-from-a-value)) | human + TTY only |
+| `kasa shell-init <zsh\|bash\|fish\|pwsh>` | Print shell code that keeps `kasa which` out of shell history (optional, see [Shell integration](#shell-integration-optional)) | anyone |
 | `kasa run <profile> -- <cmd> [args]` | Run an allow-listed command with the profile's secrets as env vars | anyone |
 | `kasa mail send --profile <p> --to <addr> --subject <s> [--body <m> \| --body-file <f>]` | Send mail via the profile's SMTP settings | anyone |
 | `kasa profile ls \| edit \| path` | Show, edit or locate the profile file | anyone |
@@ -152,15 +154,13 @@ Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pas
 `kasa which` (alias `lookup`) tells you which key(s) hold a value you already have, so you can give an AI agent only the key name. The values are compared inside the `kasa` process and never printed; the output is only the matching key names, one per line, sorted. Human + TTY only.
 
 ```bash
-kasa which berke123                         # exact match (case-sensitive, constant-time compare)
-kasa which -i berke sezen --contains        # either value appears anywhere, ignoring case
-kasa which --all berke sezen --contains     # BOTH values must appear
-kasa which -e '^berke\d+$'                  # regular expression (Go RE2), matched anywhere in the value
-kasa which -- -dash-value                   # everything after -- is a value
-kasa which                                  # no value given: asked through a hidden prompt
+kasa which                    # exact match (case-sensitive, constant-time compare)
+kasa which -i --contains      # contains, ignoring case
+kasa which --all --contains   # asks for two values: BOTH must appear
+kasa which -e                 # each value is a regular expression (Go RE2), matched anywhere in the value
 ```
 
-Flags may come before or after the values.
+Values are never arguments. `kasa which` asks for them on a hidden prompt (no echo): `Value 1 (empty line to finish): `, `Value 2 (...)`, and so on; an empty line ends the list. With several values, any one may match (`--all`: every one must). An argument that is not a flag, `--`, or an unknown flag is rejected with an error that does not repeat what you typed.
 
 | Flag | Meaning |
 |---|---|
@@ -171,7 +171,7 @@ Flags may come before or after the values.
 
 Output goes to stdout. If nothing matches, stdout is empty, `no match` goes to stderr and the exit status is 1. Keys that cannot be read are listed on stderr as `unreadable: <name>`. The audit log records only the mode and counts, never a value or pattern.
 
-> **Warning:** a value given as an argument lands in your shell history and is visible in `ps` output for a moment. Install the [shell integration](#shell-integration-required-step) (`eval "$(kasa shell-init zsh)"` etc.) so these command lines are not saved, or run `kasa which` without a value (hidden prompt). If the integration is not active (`KASA_HISTORY_GUARD` empty), `kasa which` prints a one-line warning to stderr; the result is still printed.
+> **Why:** a value on the command line would land in your shell history, in `ps` output and in AI chat transcripts. So the binary only accepts values from the hidden prompt. If you typed a value as an argument anyway, the line you typed may already be in your shell history; the error says so. An invalid `--regex` pattern is reported as `invalid regex (pattern not shown)`.
 
 ## Profiles
 
