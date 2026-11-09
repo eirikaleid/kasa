@@ -12,6 +12,10 @@
   <style>
     .sans { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; }
     .mono { font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; }
+    /* Flow only on the two allowed paths; the refused one stays still. */
+    .flow { fill: none; stroke: #7ee787; stroke-width: 2.5; stroke-dasharray: 6 16; animation: flow 1.6s linear infinite; }
+    @keyframes flow { to { stroke-dashoffset: -22; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
   </style>
 
   <rect width="900" height="480" rx="14" fill="#0d1117"/>
@@ -38,6 +42,10 @@
   <path d="M472 240 C 515 240, 515 80, 556 80" fill="none" stroke="#8b949e" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar)"/>
   <path d="M472 240 L 556 240" fill="none" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arg)"/>
   <path d="M472 240 C 515 240, 515 400, 556 400" fill="none" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arg)"/>
+
+  <!-- flow pulses on the allowed paths (decorative; base lines above are the final state) -->
+  <path class="flow" d="M472 240 L 548 240"/>
+  <path class="flow" d="M472 240 C 515 240, 515 400, 548 400"/>
 
   <!-- path 1: get -->
   <rect x="560" y="30" width="310" height="100" rx="12" fill="#161b22" stroke="#30363d"/>
