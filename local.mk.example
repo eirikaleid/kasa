@@ -1,5 +1,5 @@
 # Copy to local.mk (git-ignored). `make install` reads it, so TRUSTED_DIRS and
 # DEV_ROOT are baked into the binary without repeating them on the command line.
 # A value given on the command line (make install DEV_ROOT=...) still wins.
-TRUSTED_DIRS = ~/dotfiles/bin
-DEV_ROOT = ~/Developer
+TRUSTED_DIRS = ~/bin
+DEV_ROOT = ~/src

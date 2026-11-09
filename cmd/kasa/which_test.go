@@ -18,24 +18,24 @@ func TestEslesir(t *testing.T) {
 		kip           whichKip
 		bekle         bool
 	}{
-		{"tam esit", "Berke", "Berke", whichKip{}, true},
-		{"bayraksiz harf duyarli", "Berke", "berke", whichKip{}, false},
-		{"tam: onek eslesmez", "Berke", "Berk", whichKip{}, false},
-		{"-i kucuk", "Berke", "berke", i, true},
-		{"-i buyuk", "Berke", "BERKE", i, true},
-		{"prefix", "Berke", "Berk", pre, true},
-		{"prefix yanlis", "Berke", "erke", pre, false},
-		{"suffix", "Berke", "erke", suf, true},
-		{"suffix yanlis", "Berke", "Berk", suf, false},
-		{"-i --suffix", "Berke", "ErKe", whichKip{IgnoreCase: true, Suffix: true}, true},
-		{"-i yoksa suffix harf duyarli", "Berke", "ErKe", suf, false},
-		{"prefix+suffix: prefix tutar", "Berke", "Berk", whichKip{Prefix: true, Suffix: true}, true},
-		{"prefix+suffix: suffix tutar", "Berke", "erke", whichKip{Prefix: true, Suffix: true}, true},
-		{"prefix+suffix: ortada kalir", "xBerkex", "Berk", whichKip{Prefix: true, Suffix: true}, false},
-		{"contains ortada", "xxBerkexx", "Berk", whichKip{Contains: true}, true},
-		{"contains onek", "Berke", "Berk", whichKip{Contains: true}, true},
-		{"contains sonek", "Berke", "erke", whichKip{Contains: true}, true},
-		{"contains yok", "Berke", "zzzz", whichKip{Contains: true}, false},
+		{"tam esit", "Alice", "Alice", whichKip{}, true},
+		{"bayraksiz harf duyarli", "Alice", "alice", whichKip{}, false},
+		{"tam: onek eslesmez", "Alice", "Berk", whichKip{}, false},
+		{"-i kucuk", "Alice", "alice", i, true},
+		{"-i buyuk", "Alice", "BERKE", i, true},
+		{"prefix", "Alice", "Berk", pre, true},
+		{"prefix yanlis", "Alice", "erke", pre, false},
+		{"suffix", "Alice", "erke", suf, true},
+		{"suffix yanlis", "Alice", "Berk", suf, false},
+		{"-i --suffix", "Alice", "ErKe", whichKip{IgnoreCase: true, Suffix: true}, true},
+		{"-i yoksa suffix harf duyarli", "Alice", "ErKe", suf, false},
+		{"prefix+suffix: prefix tutar", "Alice", "Berk", whichKip{Prefix: true, Suffix: true}, true},
+		{"prefix+suffix: suffix tutar", "Alice", "erke", whichKip{Prefix: true, Suffix: true}, true},
+		{"prefix+suffix: ortada kalir", "xAlicex", "Berk", whichKip{Prefix: true, Suffix: true}, false},
+		{"contains ortada", "xxAlicexx", "Berk", whichKip{Contains: true}, true},
+		{"contains onek", "Alice", "Berk", whichKip{Contains: true}, true},
+		{"contains sonek", "Alice", "erke", whichKip{Contains: true}, true},
+		{"contains yok", "Alice", "zzzz", whichKip{Contains: true}, false},
 		{"-i --contains", "xxBERKExx", "berk", whichKip{IgnoreCase: true, Contains: true}, true},
 		{"tr: ışık/IŞIK", "ışık", "IŞIK", i, true},
 		{"tr: IŞIK/ışık", "IŞIK", "ışık", i, true},
@@ -54,11 +54,11 @@ func TestEslesir(t *testing.T) {
 
 func TestEslesirKisaSorgu(t *testing.T) {
 	// 4 karakter alt siniri kalkti: kisa sorgu kismi kiplerde kabul.
-	if ok, err := eslesir("Berke18", "18", whichKip{Contains: true}); err != nil || !ok {
+	if ok, err := eslesir("Alice18", "18", whichKip{Contains: true}); err != nil || !ok {
 		t.Errorf("\"18\" --contains: %v %v", ok, err)
 	}
 	for _, k := range []whichKip{{Prefix: true}, {Suffix: true}, {Prefix: true, Suffix: true, IgnoreCase: true}} {
-		if _, err := eslesir("Berke", "B", k); err != nil {
+		if _, err := eslesir("Alice", "B", k); err != nil {
 			t.Errorf("1 karakter %s reddedildi: %v", k, err)
 		}
 	}
@@ -118,7 +118,7 @@ func TestWhichAyristirDegerReddedilir(t *testing.T) {
 }
 
 func TestWhichDegerleriOku(t *testing.T) {
-	girdi := []string{"berke", "sezen", ""}
+	girdi := []string{"alice", "bobby", ""}
 	var etiketler []string
 	prompt := func(label string) (string, error) {
 		etiketler = append(etiketler, label)
@@ -127,7 +127,7 @@ func TestWhichDegerleriOku(t *testing.T) {
 		return v, nil
 	}
 	got, err := whichDegerleriOku(prompt)
-	if err != nil || strings.Join(got, ",") != "berke,sezen" {
+	if err != nil || strings.Join(got, ",") != "alice,bobby" {
 		t.Fatalf("got %q err %v", got, err)
 	}
 	if strings.Join(etiketler, "|") != "Value 1 (empty line to finish): |Value 2 (empty line to finish): |Value 3 (empty line to finish): " {
@@ -153,15 +153,15 @@ func sorgu(t *testing.T, k whichKip, degerler ...string) *whichSorgu {
 }
 
 func TestSorguOrAnd(t *testing.T) {
-	or := sorgu(t, whichKip{Contains: true}, "berke", "sezen")
-	and := sorgu(t, whichKip{Contains: true, All: true}, "berke", "sezen")
+	or := sorgu(t, whichKip{Contains: true}, "alice", "bobby")
+	and := sorgu(t, whichKip{Contains: true, All: true}, "alice", "bobby")
 	tablo := []struct {
 		v      string
 		or, ve bool
 	}{
-		{"berke-sezen", true, true},
-		{"berke1", true, false},
-		{"sezen1", true, false},
+		{"alice-bobby", true, true},
+		{"alice1", true, false},
+		{"bobby1", true, false},
 		{"baska", false, false},
 	}
 	for _, c := range tablo {
@@ -186,17 +186,17 @@ func TestSorguRegex(t *testing.T) {
 		v        string
 		beklenen bool
 	}{
-		{"ber.e ortada", whichKip{Regex: true}, "ber.e", "xxberkexx", true},
-		{"ber.e yok", whichKip{Regex: true}, "ber.e", "xxberxx", false},
-		{"capali tam", whichKip{Regex: true}, `^berke\d+$`, "berke123", true},
-		{"capali tam: sonda harf", whichKip{Regex: true}, `^berke\d+$`, "berke123x", false},
-		{"harf duyarli", whichKip{Regex: true}, "berke", "BERKE", false},
-		{"-i BERKE", whichKip{Regex: true, IgnoreCase: true}, "BERKE", "xberkex", true},
-		{"-i deger buyuk", whichKip{Regex: true, IgnoreCase: true}, `^berke\d+$`, "BERKE12", true},
+		{"al.ce ortada", whichKip{Regex: true}, "al.ce", "xxalicexx", true},
+		{"al.ce yok", whichKip{Regex: true}, "al.ce", "xxberxx", false},
+		{"capali tam", whichKip{Regex: true}, `^alice\d+$`, "alice123", true},
+		{"capali tam: sonda harf", whichKip{Regex: true}, `^alice\d+$`, "alice123x", false},
+		{"harf duyarli", whichKip{Regex: true}, "alice", "BERKE", false},
+		{"-i BERKE", whichKip{Regex: true, IgnoreCase: true}, "BERKE", "xalicex", true},
+		{"-i deger buyuk", whichKip{Regex: true, IgnoreCase: true}, `^alice\d+$`, "BERKE12", true},
 		{"-i tr: IŞIK", whichKip{Regex: true, IgnoreCase: true}, "IŞIK", "ışık", true},
 		{"-i tr: İstanbul", whichKip{Regex: true, IgnoreCase: true}, "^istanbul", "İSTANBUL1", true},
-		// katla() deseni dümdüz kucultseydi \D -> \d olur ve "berke123" eslesirdi.
-		{"-i kacis korunur \\D", whichKip{Regex: true, IgnoreCase: true}, `^BERKE\D+$`, "berke123", false},
+		// katla() deseni dümdüz kucultseydi \D -> \d olur ve "alice123" eslesirdi.
+		{"-i kacis korunur \\D", whichKip{Regex: true, IgnoreCase: true}, `^BERKE\D+$`, "alice123", false},
 		{"-i kacis korunur \\D (+)", whichKip{Regex: true, IgnoreCase: true}, `^BERKE\D+$`, "BERKEabc", true},
 		{"-i \\p{Greek}", whichKip{Regex: true, IgnoreCase: true}, `\p{Greek}`, "xαx", true},
 		{"-i \\PL", whichKip{Regex: true, IgnoreCase: true}, `^A\PL$`, "a1", true},
@@ -237,7 +237,7 @@ func TestYeniSorguHatalar(t *testing.T) {
 }
 
 func TestWhichTaraCikti(t *testing.T) {
-	vals := map[string]string{"z/b": "berke123", "a/x": "xxberke1", "m/n": "baska", "k/bad": ""}
+	vals := map[string]string{"z/b": "alice123", "a/x": "xxalice1", "m/n": "baska", "k/bad": ""}
 	oku := func(k string) (string, error) {
 		if k == "k/bad" {
 			return "", errors.New("denied")
@@ -245,7 +245,7 @@ func TestWhichTaraCikti(t *testing.T) {
 		return vals[k], nil
 	}
 	var out, errb bytes.Buffer
-	n, taranan := whichTara(sorgu(t, whichKip{Contains: true}, "berke123", "xxberke"), []string{"z/b", "a/x", "m/n", "k/bad"}, oku, &out, &errb)
+	n, taranan := whichTara(sorgu(t, whichKip{Contains: true}, "alice123", "xxalice"), []string{"z/b", "a/x", "m/n", "k/bad"}, oku, &out, &errb)
 	if n != 2 || taranan != 3 {
 		t.Errorf("n=%d taranan=%d", n, taranan)
 	}
@@ -256,7 +256,7 @@ func TestWhichTaraCikti(t *testing.T) {
 		t.Errorf("stderr = %q", errb.String())
 	}
 	out.Reset()
-	if n, _ := whichTara(sorgu(t, whichKip{Contains: true, All: true}, "berke123", "xxberke"), []string{"z/b", "a/x"}, oku, &out, &errb); n != 0 || out.Len() != 0 {
+	if n, _ := whichTara(sorgu(t, whichKip{Contains: true, All: true}, "alice123", "xxalice"), []string{"z/b", "a/x"}, oku, &out, &errb); n != 0 || out.Len() != 0 {
 		t.Errorf("--all eslesmemeli: n=%d out=%q", n, out.String())
 	}
 }
