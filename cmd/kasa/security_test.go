@@ -17,6 +17,18 @@ import (
 //   - audit / profiles.json / state: a temporary home directory
 //   - KASA_SOR is unset and an agent marker is set: no test opens a password dialog.
 func TestMain(m *testing.M) {
+	// The test binary is also the masker that calistir starts (`<binary> __maske`).
+	if len(os.Args) > 1 && os.Args[1] == "__maske" {
+		testEvDizini = os.Getenv("KASA_TEST_RUN_EV")
+		if testEvDizini == "" {
+			os.Exit(97) // never write to the real audit log
+		}
+		if err := cmdMaske(os.Args[2:]); err != nil {
+			os.Stderr.WriteString("masker: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	ev, err := os.MkdirTemp("", "kasa-test-ev-")
 	if err != nil {
 		panic(err)

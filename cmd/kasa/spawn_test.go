@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"errors"
+	"flag"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,161 +17,213 @@ import (
 
 const testSir = "s3cr3t-value-9"
 
-// TestCocukYardimci is not a test: it is the process the tests below run.
-// It calls cocukCalistir with a /bin/sh script from the environment; the
-// pipes the parent hands it make every stream a non-terminal. The exit status
-// is the child's, as in kasa run.
-func TestCocukYardimci(t *testing.T) {
-	betik := os.Getenv("KASA_TEST_BETIK")
-	if betik == "" {
+// TestYanYardimci is not a test: it is the "kasa run" process the tests below
+// start. It calls calistir (cmdRun after the secrets are resolved) with the
+// command after "--"; calistir execs it, so this process becomes the target.
+// The masker is the test binary itself (TestMain handles __maske).
+func TestYanYardimci(t *testing.T) {
+	if os.Getenv("KASA_TEST_YAN") == "" {
 		t.Skip("helper process")
 	}
-	env := []string{"PATH=/usr/bin:/bin", "SIR=" + testSir, "KISA=abc12", "HAZIR=" + os.Getenv("KASA_TEST_HAZIR")}
+	testEvDizini = os.Getenv("KASA_TEST_RUN_EV")
+	if os.Getenv("KASA_TEST_YAN_YOK") != "" {
+		maskeleyiciYolu = func() (string, error) { return "/nonexistent/kasa", nil }
+	}
+	args := flag.Args()
+	env := []string{"PATH=/usr/bin:/bin", "SIR=" + testSir, "KISA=abc12"}
 	d := maskeDegerleri(map[string]string{"SIR": testSir, "KISA": "abc12"})
-	kod, n, err := cocukCalistir("/bin/sh", []string{"sh", "-c", betik}, env, d, os.Stdin, os.Stdout, os.Stderr)
-	if err != nil {
-		os.Stderr.WriteString("helper error: " + err.Error() + "\n")
-		os.Exit(99)
+	err := calistir("yan", args[0], args, env, args[0], d)
+	os.Stderr.WriteString("run error: " + err.Error() + "\n")
+	if errors.Is(err, errMaskeleyici) {
+		os.Exit(70)
 	}
-	if os.Getenv("KASA_TEST_SAY") != "" {
-		os.Stderr.WriteString("N=" + string(rune('0'+n)) + "\n")
-	}
-	os.Exit(kod)
+	os.Exit(1)
 }
 
-type cocukSonuc struct {
-	out, err string
-	kod      int
-}
-
-func cocukKos(t *testing.T, betik, stdin string, ek ...string) cocukSonuc {
+// yanKomut: a "kasa run yan -- <cmdline>" process with pipes as stdout/stderr.
+func yanKomut(t *testing.T, cmdline ...string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestCocukYardimci$")
-	cmd.Env = append(os.Environ(), append([]string{"KASA_TEST_BETIK=" + betik}, ek...)...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
+	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestYanYardimci$", "--"}, cmdline...)...)
+	cmd.Env = append(os.Environ(), "KASA_TEST_YAN=1", "KASA_TEST_RUN_EV="+testEvDizini)
+	return cmd
+}
+
+func yanKos(t *testing.T, cmdline ...string) (stdout, stderr string, kod int) {
+	t.Helper()
+	cmd := yanKomut(t, cmdline...)
 	var o, e strings.Builder
 	cmd.Stdout, cmd.Stderr = &o, &e
 	err := cmd.Run()
-	r := cocukSonuc{out: o.String(), err: e.String()}
-	var xe *exec.ExitError
-	if errors.As(err, &xe) {
-		r.kod = xe.ExitCode()
-	} else if err != nil {
+	var ee *exec.ExitError
+	if err != nil && !errors.As(err, &ee) {
 		t.Fatal(err)
 	}
-	return r
+	return o.String(), e.String(), cmd.ProcessState.ExitCode()
 }
 
-func TestCocukMaskelerStdoutVeStderr(t *testing.T) {
-	r := cocukKos(t, `echo "out=$SIR k=$KISA"; echo "err=$SIR" >&2`, "", "KASA_TEST_SAY=1")
-	if r.out != "out=*** k=abc12\n" {
-		t.Errorf("stdout %q", r.out)
+func TestYanMaskelerStdoutVeStderr(t *testing.T) {
+	profilEvi(t, nil)
+	o, e, kod := yanKos(t, "/bin/sh", "-c", `echo "out=$SIR"; echo "err=$SIR" >&2; echo "kisa=$KISA"`)
+	if kod != 0 || o != "out=***\nkisa=abc12\n" || e != "err=***\n" {
+		t.Fatalf("kod=%d stdout=%q stderr=%q", kod, o, e)
 	}
-	if r.err != "err=***\nN=2\n" {
-		t.Errorf("stderr %q", r.err)
-	}
-	if strings.Contains(r.out+r.err, testSir) {
-		t.Error("secret leaked")
-	}
-}
-
-func TestCocukSinirdaBolunenDeger(t *testing.T) {
-	// the value arrives in two reads, 0.3 s apart
-	r := cocukKos(t, `printf 's3cr3t-'; sleep 0.3; printf 'value-9\n'`, "")
-	if r.out != "***\n" {
-		t.Errorf("stdout %q", r.out)
+	if log := auditOku(t); !strings.Contains(log, "\tNOTE\trun\tyan\t") || !strings.Contains(log, "\tmasked 2 occurrence(s)\n") {
+		t.Errorf("missing masked NOTE line:\n%s", log)
 	}
 }
 
-func TestCocukCikisKodu(t *testing.T) {
-	if r := cocukKos(t, `echo hi; exit 7`, ""); r.kod != 7 || r.out != "hi\n" {
-		t.Errorf("exit 7: got %d, stdout %q", r.kod, r.out)
-	}
-	if r := cocukKos(t, `kill -KILL $$`, ""); r.kod != 128+int(syscall.SIGKILL) {
-		t.Errorf("killed by SIGKILL: got %d, want 137", r.kod)
+func TestYanCikisKodu(t *testing.T) {
+	profilEvi(t, nil)
+	if _, _, kod := yanKos(t, "/bin/sh", "-c", "exit 7"); kod != 7 {
+		t.Fatalf("exit status %d, want 7", kod)
 	}
 }
 
-func TestCocukStdinGecer(t *testing.T) {
-	r := cocukKos(t, `read x; echo "got:$x"; cat`, "hello-stdin\nrest "+testSir+"\n")
-	if r.out != "got:hello-stdin\nrest ***\n" {
-		t.Errorf("stdout %q", r.out)
+// Large output: the pipe is blocking for the target (os.Pipe's O_NONBLOCK
+// would otherwise reach it through dup2 and give EAGAIN once the pipe is full).
+func TestYanBuyukCikti(t *testing.T) {
+	profilEvi(t, nil)
+	o, e, kod := yanKos(t, "/bin/sh", "-c", "head -c 1000000 /dev/zero")
+	if kod != 0 || len(o) != 1000000 || e != "" {
+		t.Fatalf("kod=%d len=%d stderr=%q", kod, len(o), e)
 	}
 }
 
-func TestCocukSigtermIletilir(t *testing.T) {
-	hazir := filepath.Join(t.TempDir(), "hazir")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestCocukYardimci$")
-	cmd.Env = append(os.Environ(), "KASA_TEST_HAZIR="+hazir, "KASA_TEST_BETIK=touch \"$HAZIR\"; exec sleep 30")
+// The target runs in kasa's process: `echo $$` prints the PID kasa was started with.
+func TestYanAyniPID(t *testing.T) {
+	profilEvi(t, nil)
+	cmd := yanKomut(t, "/bin/sh", "-c", "echo $$")
 	var o strings.Builder
-	cmd.Stdout, cmd.Stderr = &o, &o
+	cmd.Stdout = &o
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(o.String()); got != strconv.Itoa(cmd.Process.Pid) {
+		t.Fatalf("target PID %s, kasa PID %d", got, cmd.Process.Pid)
+	}
+}
+
+// The trend-radar pattern: alarm(2) set before exec'ing kasa hits the target.
+func TestYanAlarm(t *testing.T) {
+	profilEvi(t, nil)
+	perl, err := exec.LookPath("perl")
+	if err != nil {
+		t.Skip("perl not found")
+	}
+	args := []string{"-e", "alarm 1; exec @ARGV", os.Args[0], "-test.run=^TestYanYardimci$", "--", "/bin/sleep", "10"}
+	cmd := exec.Command(perl, args...)
+	cmd.Env = append(os.Environ(), "KASA_TEST_YAN=1", "KASA_TEST_RUN_EV="+testEvDizini)
+	var o strings.Builder
+	cmd.Stdout = &o // a pipe: the masked path
+	bas := time.Now()
+	err = cmd.Run()
+	if sure := time.Since(bas); sure > 4*time.Second {
+		t.Fatalf("took %v; alarm did not reach the target", sure)
+	}
+	ws, _ := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if err == nil || !ws.Signaled() || ws.Signal() != syscall.SIGALRM {
+		t.Fatalf("want death by SIGALRM, got %v", err)
+	}
+}
+
+// kill -9 on kasa's PID kills the target (same process): nothing is left behind.
+func TestYanKill9(t *testing.T) {
+	profilEvi(t, nil)
+	cmd := yanKomut(t, "/bin/sh", "-c", "echo $$; exec /bin/sleep 30")
+	r, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	bitti := make(chan error, 1)
-	go func() { bitti <- cmd.Wait() }()
-	for i := 0; ; i++ {
-		if _, err := os.Stat(hazir); err == nil {
-			break
-		}
-		if i > 200 {
-			cmd.Process.Kill()
-			t.Fatal("child never became ready")
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	// Not the sleep: the helper (kasa's stand-in) gets the signal and must pass it on.
-	cmd.Process.Signal(syscall.SIGTERM)
-	select {
-	case err := <-bitti:
-		var xe *exec.ExitError
-		if !errors.As(err, &xe) || xe.ExitCode() != 128+int(syscall.SIGTERM) {
-			t.Fatalf("want exit 143, got %v\n%s", err, o.String())
-		}
-	case <-time.After(10 * time.Second):
-		cmd.Process.Kill()
-		t.Fatal("SIGTERM was not forwarded: the child is still running")
-	}
-}
-
-func TestCocukDegerleriSifirlar(t *testing.T) {
-	d := maskeDegerleri(map[string]string{"A": testSir})
-	r, w, _ := os.Pipe()
-	defer r.Close()
-	if _, _, err := cocukCalistir("/usr/bin/true", []string{"true"}, nil, d, nil, w, w); err != nil {
+	satir, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil {
 		t.Fatal(err)
 	}
-	w.Close()
-	for _, b := range d[0] {
-		if b != 0 {
-			t.Fatalf("value not wiped: %q", d[0])
-		}
+	pid := cmd.Process.Pid
+	if strings.TrimSpace(satir) != strconv.Itoa(pid) {
+		t.Fatalf("target PID %q, kasa PID %d", satir, pid)
+	}
+	bas := time.Now()
+	syscall.Kill(pid, syscall.SIGKILL)
+	io.Copy(io.Discard, r) // EOF: the masker saw the target's pipe close
+	cmd.Wait()
+	if sure := time.Since(bas); sure > 4*time.Second {
+		t.Fatalf("took %v after SIGKILL", sure)
+	}
+	if ws, _ := cmd.ProcessState.Sys().(syscall.WaitStatus); !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+		t.Fatalf("want SIGKILL, got %v", cmd.ProcessState)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("PID %d still exists: %v", pid, err)
 	}
 }
 
-func TestIletilsinMi(t *testing.T) {
-	for _, s := range iletilenSinyaller {
-		if !iletilsinMi(s, false) {
-			t.Errorf("%v must be forwarded when kasa is not in a terminal's foreground group", s)
-		}
+// Ctrl-C goes to the whole process group, the masker included: it ignores it
+// and still passes on what the target writes after the signal.
+func TestYanSigintGrubaKayipYok(t *testing.T) {
+	profilEvi(t, nil)
+	cmd := yanKomut(t, "/bin/sh", "-c", `trap 'echo "son=$SIR"; exit 3' INT; echo basla; while :; do sleep 0.1; done`)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	r, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, s := range []os.Signal{syscall.SIGINT, syscall.SIGQUIT, syscall.SIGWINCH} {
-		if iletilsinMi(s, true) {
-			t.Errorf("%v already reaches the child from the terminal: forwarding doubles it", s)
-		}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
 	}
-	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2} {
-		if !iletilsinMi(s, true) {
-			t.Errorf("%v is not sent by the terminal: it must be forwarded", s)
-		}
+	br := bufio.NewReader(r)
+	if satir, err := br.ReadString('\n'); err != nil || satir != "basla\n" {
+		t.Fatalf("first line %q: %v", satir, err)
+	}
+	syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
+	kalan, _ := io.ReadAll(br)
+	cmd.Wait()
+	if string(kalan) != "son=***\n" || cmd.ProcessState.ExitCode() != 3 {
+		t.Fatalf("after SIGINT: %q, exit %d", kalan, cmd.ProcessState.ExitCode())
 	}
 }
 
-// scriptKos runs cmdline under a pseudo-terminal (macOS script(1)): the
-// command's stdin, stdout and stderr are the terminal unless the command line
-// redirects them.
+// The masker cannot start: exit 70 and the command is NOT run unmasked.
+func TestYanMaskeleyiciYoksa70(t *testing.T) {
+	profilEvi(t, nil)
+	isaret := filepath.Join(t.TempDir(), "calisti")
+	cmd := yanKomut(t, "/usr/bin/touch", isaret)
+	cmd.Env = append(cmd.Env, "KASA_TEST_YAN_YOK=1")
+	var o, e strings.Builder
+	cmd.Stdout, cmd.Stderr = &o, &e
+	cmd.Run()
+	if kod := cmd.ProcessState.ExitCode(); kod != 70 {
+		t.Fatalf("exit %d, want 70; stderr=%q", kod, e.String())
+	}
+	if _, err := os.Stat(isaret); err == nil {
+		t.Fatal("the command ran without the masker")
+	}
+}
+
+// Called directly (stdin not a pipe) __maske refuses.
+func TestMaskeDogrudanReddedilir(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "__maske", "p", "1")
+	cmd.Env = append(os.Environ(), "KASA_TEST_RUN_EV="+t.TempDir())
+	cmd.Stdin = nil // /dev/null
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "not for direct use") {
+		t.Fatalf("want refusal, got %v %q", err, out)
+	}
+}
+
+func TestDegerYazOkuGidisDonus(t *testing.T) {
+	d := [][]byte{[]byte("uzun-deger-1"), []byte("abcdef")}
+	r, w, _ := os.Pipe()
+	go func() { degerYaz(w, d); w.Close() }()
+	got, err := degerOku(r)
+	if err != nil || len(got) != 2 || string(got[0]) != "uzun-deger-1" || string(got[1]) != "abcdef" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
+// scriptKos runs cmdline under script(1), so stdin/stdout/stderr are a terminal.
 func scriptKos(t *testing.T, cmdline string, env ...string) string {
 	t.Helper()
 	cmd := exec.Command("/usr/bin/script", "-q", "/dev/null", "/bin/sh", "-c", cmdline)
@@ -179,16 +235,24 @@ func scriptKos(t *testing.T, cmdline string, env ...string) string {
 	return string(out)
 }
 
-// A stream that is a terminal goes straight to the child (a human at a
-// terminal sees the real output); the other one is still masked.
-func TestCocukTerminalAkisDogrudan(t *testing.T) {
+// A stream that is a terminal goes straight to the target (a human at a
+// terminal sees the real output); the other one is still masked. A file
+// written by the masker can lag the target's exit by a moment (README), so it
+// is polled.
+func TestYanTerminalAkisDogrudan(t *testing.T) {
+	profilEvi(t, nil)
 	errDosya := filepath.Join(t.TempDir(), "err")
-	out := scriptKos(t, os.Args[0]+" -test.run=^TestCocukYardimci$ 2>"+errDosya,
-		`KASA_TEST_BETIK=echo "out=$SIR"; echo "err=$SIR" >&2`)
+	out := scriptKos(t, os.Args[0]+" -test.run=^TestYanYardimci$ -- /bin/sh -c 'echo out=$SIR; echo err=$SIR >&2' 2>"+errDosya,
+		"KASA_TEST_YAN=1", "KASA_TEST_RUN_EV="+testEvDizini)
 	if !strings.Contains(out, "out="+testSir) {
 		t.Errorf("terminal stream must not be masked: %q", out)
 	}
-	e, _ := os.ReadFile(errDosya)
+	var e []byte
+	for son := time.Now().Add(3 * time.Second); time.Now().Before(son); time.Sleep(20 * time.Millisecond) {
+		if e, _ = os.ReadFile(errDosya); len(e) > 0 && e[len(e)-1] == '\n' {
+			break
+		}
+	}
 	if string(e) != "err=***\n" {
 		t.Errorf("stderr (a file) must be masked: %q", e)
 	}

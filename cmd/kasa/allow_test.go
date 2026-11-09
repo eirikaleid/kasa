@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"io"
 	"os"
@@ -546,8 +545,8 @@ func TestProfilTestDispatchUyariVeAudit(t *testing.T) {
 }
 
 // TestRunYardimci is not a test: it is the child process of TestRunUyari. It
-// calls cmdRun, which replaces the process with the allowed command (or, with
-// a non-terminal output, runs it as a child and returns).
+// calls cmdRun, which replaces the process with the allowed command (with a
+// non-terminal output, after starting the masker).
 func TestRunYardimci(t *testing.T) {
 	ev := os.Getenv("KASA_TEST_RUN_EV")
 	if ev == "" {
@@ -556,14 +555,10 @@ func TestRunYardimci(t *testing.T) {
 	testEvDizini, KilitliProfilYolu = ev, filepath.Join(ev, "yok.json")
 	testKeychainYolu = filepath.Join(ev, "kasa.keychain-db")
 	if err := cmdRun(flag.Args()); err != nil {
-		var kod cikisKodu
-		if errors.As(err, &kod) {
-			os.Exit(int(kod))
-		}
 		os.Stderr.WriteString("run error: " + err.Error() + "\n")
 		os.Exit(1)
 	}
-	os.Exit(0) // the child ran under cmdRun (output not a terminal): do not let the test print PASS
+	os.Exit(0)
 }
 
 func TestRunUyari(t *testing.T) {

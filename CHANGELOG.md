@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.1 — 2026-11-09
+
+- **Fix: `kasa run` with a non-terminal output runs the command via `exec` again.** 2.3.0 ran it as a child of kasa so the output could be masked. That broke two things: `perl -e 'alarm 2; exec @ARGV' kasa run p -- cmd | cat` (the timeout pattern trend-radar uses) delivered SIGALRM to kasa and the command ran on, and `kill -9 <kasa pid>` (what Python's `subprocess.run(timeout=)` does) left the command orphaned with the secrets in its environment.
+- Now the command always takes over kasa's PID. Masking moved to a side process, `kasa __maske` (hidden, refuses to run unless its stdin is a pipe): every non-terminal stream becomes a pipe it reads; the values are sent to it over a separate pipe, length-prefixed (not argv or environment). It ignores SIGINT, SIGTERM, SIGHUP, SIGQUIT and SIGPIPE, reads to EOF, writes the `NOTE run <profile> masked N occurrence(s)` audit line (when N > 0) and exits.
+- If the side process cannot be started, kasa exits with 70 and does **not** run the command unmasked.
+- Removed the 2.3.0 signal forwarding and exit-status translation; the masker itself is unchanged.
+- Known side effect: the side process can still be writing the last bytes when the command has exited. A reader on a pipe gets EOF only after that; output redirected straight to a file can be complete a moment after the shell returns.
+- Tests (real processes): masked stdout and stderr, exit status 7, 1 MB output, target PID equals kasa's PID, `perl alarm 1; exec` ends in about 1 s, `kill -9` on kasa's PID leaves no process, SIGINT to the group loses no output, exit 70 without exec when the side process cannot start, direct `__maske` refused.
+
 ## 2.3.0 — 2026-11-09
 
 - **Output masking for `kasa run`.** If stdout and stderr are both terminals, nothing changes: kasa still replaces itself with the command (`exec`). If one or both are not (agent, pipe, redirect), kasa runs the command as a child instead: stdin goes straight to it, a stream that is a terminal goes straight to it, and every other stream is read by kasa, masked and written to the real output.
