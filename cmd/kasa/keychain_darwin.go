@@ -18,11 +18,19 @@ package main
 // call (SecKeychainSetUserInteractionAllowed(false)). The dialog is opened only
 // by kcPencereyleAc, deliberately (lock_darwin.go).
 //
-// ACL: items are written with the same access list as old items written by
-// `security add-generic-password`: the trusted application is /usr/bin/security.
-// This way old and new items are read the same way, and when kasa is rebuilt
-// (signature/cdhash changes) the keychain does not ask "kasa wants to access
-// this item".
+// ACL: items are written with an access list whose only trusted application
+// is the running kasa binary (SecTrustedApplicationCreateFromPath(NULL)). The
+// entry stores kasa's designated requirement; `make build` signs kasa with the
+// user's own code-signing certificate, so the requirement is
+// `identifier "kasa" and certificate leaf = H"..."`, not a cdhash: a rebuilt
+// kasa signed with the same certificate reads without a prompt, while
+// /usr/bin/security, an ad-hoc copy or any other process of the same user gets
+// errSecAuthFailed (interaction is disabled, no dialog). Reading is done here
+// too (kasaOkuC), not through the security CLI.
+//
+// Items written before 2.5.0 trust /usr/bin/security; `kasa acl migrate`
+// moves them by delete-and-rewrite (acl.go), using only the public API: an
+// item's ACL is never edited in place.
 
 /*
 #cgo LDFLAGS: -framework Security -framework CoreFoundation
@@ -122,11 +130,10 @@ static void kasaSerbestC(void *veri, UInt32 n) {
 	SecKeychainItemFreeContent(NULL, veri);
 }
 
-// guvenilenErisim: same ACL as `security add-generic-password` (without -T):
-// only /usr/bin/security can read without a prompt.
-static OSStatus guvenilenErisim(const char *etiket, SecAccessRef *erisim) {
+// kendiErisim: an ACL whose only trusted application is the running kasa.
+static OSStatus kendiErisim(const char *etiket, SecAccessRef *erisim) {
 	SecTrustedApplicationRef app = NULL;
-	OSStatus r = SecTrustedApplicationCreateFromPath("/usr/bin/security", &app);
+	OSStatus r = SecTrustedApplicationCreateFromPath(NULL, &app);
 	if (r != errSecSuccess) return r;
 	CFStringRef ad = CFStringCreateWithCString(NULL, etiket, kCFStringEncodingUTF8);
 	const void *uygulamalar[] = { app };
@@ -138,9 +145,67 @@ static OSStatus guvenilenErisim(const char *etiket, SecAccessRef *erisim) {
 	return r;
 }
 
+// tekUygulamaMi: 1 if every decrypt entry of the item's ACL names exactly one
+// trusted application and that application is the running kasa (no "any
+// application" entry, no second app, not /usr/bin/security).
+static int tekUygulamaMi(SecKeychainItemRef oge) {
+	SecTrustedApplicationRef ben = NULL;
+	CFDataRef benVeri = NULL;
+	if (SecTrustedApplicationCreateFromPath(NULL, &ben) != errSecSuccess) return 0;
+	if (SecTrustedApplicationCopyData(ben, &benVeri) != errSecSuccess || benVeri == NULL) { CFRelease(ben); return 0; }
+	SecAccessRef erisim = NULL;
+	if (SecKeychainItemCopyAccess(oge, &erisim) != errSecSuccess || erisim == NULL) { CFRelease(benVeri); CFRelease(ben); return 0; }
+	CFArrayRef acller = SecAccessCopyMatchingACLList(erisim, kSecACLAuthorizationDecrypt);
+	int tamam = acller != NULL && CFArrayGetCount(acller) > 0;
+	for (CFIndex i = 0; tamam && i < CFArrayGetCount(acller); i++) {
+		CFArrayRef uyg = NULL;
+		CFStringRef ac = NULL;
+		SecKeychainPromptSelector ps = 0;
+		if (SecACLCopyContents((SecACLRef)CFArrayGetValueAtIndex(acller, i), &uyg, &ac, &ps) != errSecSuccess) {
+			tamam = 0;
+		} else if (uyg == NULL || CFArrayGetCount(uyg) != 1) {
+			tamam = 0;
+		} else {
+			CFDataRef veri = NULL;
+			SecTrustedApplicationRef u = (SecTrustedApplicationRef)CFArrayGetValueAtIndex(uyg, 0);
+			if (SecTrustedApplicationCopyData(u, &veri) != errSecSuccess || veri == NULL || !CFEqual(veri, benVeri)) tamam = 0;
+			if (veri) CFRelease(veri);
+		}
+		if (uyg) CFRelease(uyg);
+		if (ac) CFRelease(ac);
+	}
+	if (acller) CFRelease(acller);
+	CFRelease(erisim);
+	CFRelease(benVeri);
+	CFRelease(ben);
+	return tamam;
+}
+
+// kasaBagliMiC: *bagli = 1 if the item's ACL trusts only the running kasa.
+// errSecAuthFailed on the read is not an error here: it means "not bound".
+static OSStatus kasaBagliMiC(const char *yol, const char *svc, const char *acct, int *bagli) {
+	SecKeychainRef kc = NULL;
+	*bagli = 0;
+	OSStatus r = kcAc(yol, &kc);
+	if (r != errSecSuccess) return r;
+	SecKeychainItemRef oge = NULL;
+	UInt32 n = 0;
+	void *veri = NULL;
+	r = SecKeychainFindGenericPassword(kc, (UInt32)strlen(svc), svc, (UInt32)strlen(acct), acct, &n, &veri, &oge);
+	if (veri) { sifirla(veri, n); SecKeychainItemFreeContent(NULL, veri); }
+	if (r == errSecSuccess) {
+		*bagli = tekUygulamaMi(oge);
+	} else if (r == errSecAuthFailed) {
+		r = errSecSuccess;
+	}
+	if (oge) CFRelease(oge);
+	CFRelease(kc);
+	return r;
+}
+
 // kasaYazC: updates the value if the item exists, creates it otherwise.
 static OSStatus kasaYazC(const char *yol, const char *svc, const char *acct,
-		const void *veri, UInt32 n, const char *tur, const char *aciklama) {
+		const void *veri, UInt32 n, const char *etiket, const char *tur, const char *aciklama) {
 	SecKeychainRef kc = NULL;
 	OSStatus r = kcAc(yol, &kc);
 	if (r != errSecSuccess) return r;
@@ -157,19 +222,21 @@ static OSStatus kasaYazC(const char *yol, const char *svc, const char *acct,
 		return r;
 	}
 	SecAccessRef erisim = NULL;
-	r = guvenilenErisim(svc, &erisim);
+	r = kendiErisim(svc, &erisim);
 	if (r != errSecSuccess) {
 		CFRelease(kc);
 		return r;
 	}
-	SecKeychainAttribute nit[] = {
+	// Empty attributes are left out (an item migrated from the CLI era may have none).
+	SecKeychainAttribute nit[5] = {
 		{ kSecServiceItemAttr, (UInt32)strlen(svc), (void *)svc },
 		{ kSecAccountItemAttr, (UInt32)strlen(acct), (void *)acct },
-		{ kSecLabelItemAttr, (UInt32)strlen(svc), (void *)svc },
-		{ kSecDescriptionItemAttr, (UInt32)strlen(tur), (void *)tur },
-		{ kSecCommentItemAttr, (UInt32)strlen(aciklama), (void *)aciklama },
 	};
-	SecKeychainAttributeList liste = { 5, nit };
+	UInt32 say = 2;
+	if (strlen(etiket) > 0) nit[say++] = (SecKeychainAttribute){ kSecLabelItemAttr, (UInt32)strlen(etiket), (void *)etiket };
+	if (strlen(tur) > 0) nit[say++] = (SecKeychainAttribute){ kSecDescriptionItemAttr, (UInt32)strlen(tur), (void *)tur };
+	if (strlen(aciklama) > 0) nit[say++] = (SecKeychainAttribute){ kSecCommentItemAttr, (UInt32)strlen(aciklama), (void *)aciklama };
+	SecKeychainAttributeList liste = { say, nit };
 	r = SecKeychainItemCreateFromContent(kSecGenericPasswordItemClass, &liste, n, veri, kc, erisim, &oge);
 	if (oge) CFRelease(oge);
 	CFRelease(erisim);
@@ -306,14 +373,20 @@ func kcOkuYol(yol, svc, acct string) (string, error) {
 }
 
 func kcYazYol(yol, svc, acct string, deger []byte, tur, aciklama string) error {
+	return kcYazNitelikYol(yol, svc, acct, deger, svc, tur, aciklama)
+}
+
+// kcYazNitelikYol: like kcYazYol, with an explicit label (migration keeps the
+// attributes the item already had).
+func kcYazNitelikYol(yol, svc, acct string, deger []byte, etiket, tur, aciklama string) error {
 	cy, cs, ca := C.CString(yol), C.CString(svc), C.CString(acct)
-	ct, cc := C.CString(tur), C.CString(aciklama)
-	for _, p := range []*C.char{cy, cs, ca, ct, cc} {
+	ce, ct, cc := C.CString(etiket), C.CString(tur), C.CString(aciklama)
+	for _, p := range []*C.char{cy, cs, ca, ce, ct, cc} {
 		defer C.free(unsafe.Pointer(p))
 	}
 	t := yeniTampon(deger)
 	defer t.birak()
-	return osHata(C.kasaYazC(cy, cs, ca, t.p, t.n, ct, cc))
+	return osHata(C.kasaYazC(cy, cs, ca, t.p, t.n, ce, ct, cc))
 }
 
 func kcSilYol(yol, svc, acct string) error {
@@ -324,7 +397,21 @@ func kcSilYol(yol, svc, acct string) error {
 	return osHata(C.kasaSilC(cy, cs, ca))
 }
 
-// kcKeychainSilYol: used by tests only (temporary keychain cleanup).
+// kcBagliMiYol: is the item bound to the running kasa only (see kasaBagliMiC)?
+func kcBagliMiYol(yol, svc, acct string) (bool, error) {
+	cy, cs, ca := C.CString(yol), C.CString(svc), C.CString(acct)
+	defer C.free(unsafe.Pointer(cy))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(ca))
+	var b C.int
+	if err := osHata(C.kasaBagliMiC(cy, cs, ca, &b)); err != nil {
+		return false, err
+	}
+	return b == 1, nil
+}
+
+// kcKeychainSilYol: deletes a keychain file (temporary keychains: tests and the
+// migration backup check).
 func kcKeychainSilYol(yol string) error {
 	cy := C.CString(yol)
 	defer C.free(unsafe.Pointer(cy))

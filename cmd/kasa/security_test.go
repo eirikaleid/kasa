@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -90,54 +92,242 @@ func geciciKasa(t *testing.T) (yol, parola string) {
 	return yol, parola
 }
 
-// cliYaz / cliOku: via the security CLI, the way the old kasa (and a user by
-// hand) did it. The values are fake test data; being in argv is not a problem here.
+// cliYaz: via the security CLI, the way kasa before 2.5.0 (and a user by hand)
+// wrote items: the ACL trusts /usr/bin/security only. The values are fake test
+// data; being in argv is not a problem here.
 func cliYaz(t *testing.T, svc, acct, deger string) {
 	t.Helper()
+	cliYazTam(t, svc, acct, deger, svc, "kasa secret", "managed by kasa")
+}
+
+func cliYazTam(t *testing.T, svc, acct, deger, etiket, tur, aciklama string) {
+	t.Helper()
 	out, err := exec.Command("/usr/bin/security", "add-generic-password",
-		"-s", svc, "-a", acct, "-w", deger, "-U", testKeychainYolu).CombinedOutput()
+		"-s", svc, "-a", acct, "-w", deger, "-l", etiket, "-D", tur, "-j", aciklama,
+		"-U", testKeychainYolu).CombinedOutput()
 	if err != nil {
 		t.Fatalf("security add-generic-password: %v %s", err, out)
 	}
 }
 
-func cliOku(t *testing.T, svc, acct string) (string, error) {
+// yabanciOku: tries to read an item from ANOTHER process: a copy of this test
+// binary re-signed ad-hoc with a different identifier (so a different code
+// identity), with interaction disabled. It never opens a dialog; the result is
+// the error text the copy printed ("<nil>" if it could read).
+func yabanciOku(t *testing.T, svc, acct string) string {
 	t.Helper()
-	out, err := exec.Command("/usr/bin/security", "find-generic-password",
-		"-s", svc, "-a", acct, "-w", testKeychainYolu).Output()
-	return strings.TrimRight(string(out), "\n"), err
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kopya := filepath.Join(t.TempDir(), "other-process")
+	if err := os.WriteFile(kopya, b, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("/usr/bin/codesign", "-f", "-s", "-", "-i", "other.process", kopya).CombinedOutput(); err != nil {
+		t.Fatalf("codesign: %v %s", err, out)
+	}
+	cmd := exec.Command(kopya, "-test.run=^TestYabanciYardimci$", "-test.count=1")
+	cmd.Env = append(os.Environ(), "KASA_YABANCI_OKU="+testKeychainYolu+"\n"+svc+"\n"+acct)
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	if i := strings.Index(s, "YABANCI: "); i >= 0 {
+		return strings.SplitN(s[i+len("YABANCI: "):], "\n", 2)[0]
+	}
+	t.Fatalf("helper process gave no result: %s", s)
+	return ""
 }
 
-// Backward compatibility: items written with `security add-generic-password`
-// are read/updated/deleted by the new code; items written by the new code are
-// read with the security CLI. The same holds for the backup-password service.
+// TestYabanciYardimci: runs only inside yabanciOku's child process.
+func TestYabanciYardimci(t *testing.T) {
+	a := os.Getenv("KASA_YABANCI_OKU")
+	if a == "" {
+		t.Skip("helper for yabanciOku")
+	}
+	p := strings.SplitN(a, "\n", 3)
+	_, err := kcOkuYol(p[0], p[1], p[2])
+	fmt.Printf("YABANCI: %v\n", err)
+}
+
+// aclDokumu: the vault's ACLs (`dump-keychain -a`: attributes and access
+// lists, never values, no dialog).
+func aclDokumu(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("/usr/bin/security", "dump-keychain", "-a", testKeychainYolu).CombinedOutput()
+	if err != nil {
+		t.Fatalf("dump-keychain -a: %v %s", err, out)
+	}
+	return string(out)
+}
+
+// Upgrade path: items written with `security add-generic-password` (pre-2.5.0
+// ACL) are not readable by kasa until `kasa acl migrate` (aclGocur) deletes and
+// rewrites them with kasa's own ACL; afterwards /usr/bin/security is gone from
+// the ACL and another process gets errSecAuthFailed without a dialog.
 func TestGeriyeUyumCLIveFramework(t *testing.T) {
 	_, parola := geciciKasa(t)
 
-	// old -> new
-	cliYaz(t, service, "old/cli", "old-value 1")
-	if v, err := kcGet("old/cli"); err != nil || v != "old-value 1" {
-		t.Fatalf("item written via the CLI could not be read: %q %v", v, err)
+	// Values that exercise the read path: UTF-8, newline, tab, quotes, a value
+	// that looks like hex.
+	degerler := map[string]string{
+		"old/cli":    "old-value 1",
+		"old/utf8":   "çğüşiö 日本語 ✓",
+		"old/nl":     "line1\nline2\n",
+		"old/tab":    "a\tb\tc",
+		"old/quote":  `say "hi" 'there' $x \ ` + "`" + `cmd`,
+		"old/hex":    "deadbeef00ff",
+		"old/hex0x":  "0x41424344",
+		"old/empty":  "",
+		"old/spaces": "  lead and trail  ",
 	}
-	if keys, err := kcList(); err != nil || len(keys) != 1 || keys[0] != "old/cli" {
+	for k, v := range degerler {
+		cliYaz(t, service, k, v)
+	}
+	cliYazTam(t, service, "old/attrs", "attr-value", "custom label", "custom kind", "custom comment")
+	degerler["old/attrs"] = "attr-value"
+	const eskiParola = "Qx.904417-ab"
+	cliYaz(t, yedekParolaService, yedekParolaAccount, eskiParola)
+	toplam := len(degerler) + 1
+
+	oncekiOgeler, err := kcOgeler()
+	if err != nil || len(oncekiOgeler) != toplam {
+		t.Fatalf("items before: %v %v", oncekiOgeler, err)
+	}
+	oncekiDokum := aclDokumu(t)
+
+	// old -> new: not readable before migration.
+	if v, err := kcGet("old/cli"); err == nil {
+		t.Fatalf("kasa read an item bound to /usr/bin/security without migration: %q", v)
+	}
+
+	// Dry run: nothing changes, no backup is written.
+	yedekDizin := t.TempDir()
+	yedek1 := filepath.Join(yedekDizin, "before.age")
+	var rapor strings.Builder
+	if s, err := aclGocur(&rapor, true, "", nil); err != nil || s.tasinacak != toplam || s.tasindi != 0 || s.hata != 0 {
+		t.Fatalf("dry run: %+v %v\n%s", s, err, rapor.String())
+	}
+	if aclDokumu(t) != oncekiDokum {
+		t.Fatal("the dry run changed the vault")
+	}
+	if _, err := kcGet("old/cli"); err == nil {
+		t.Fatal("the dry run changed the ACL")
+	}
+
+	// A backup that cannot be written stops the migration before any change.
+	engel := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(engel, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rapor.Reset()
+	if _, err := aclGocur(&rapor, false, "Backup.Pass-2026", []string{filepath.Join(engel, "x.age")}); err == nil {
+		t.Fatal("migration went ahead although the backup could not be written")
+	}
+	if aclDokumu(t) != oncekiDokum {
+		t.Fatal("a failed backup still changed the vault")
+	}
+
+	// The real run.
+	rapor.Reset()
+	s, err := aclGocur(&rapor, false, "Backup.Pass-2026", []string{yedek1})
+	if err != nil || s.tasindi != toplam || s.bagli != 0 || s.hata != 0 {
+		t.Fatalf("migration: %+v %v\n%s", s, err, rapor.String())
+	}
+	satirlar := strings.Split(strings.TrimSpace(rapor.String()), "\n")
+	if son := satirlar[len(satirlar)-2]; !strings.Contains(son, yedekParolaService) {
+		t.Fatalf("the backup-password item was not moved last:\n%s", rapor.String())
+	}
+	// Encrypted backup exists, opens, holds every `kasa` item.
+	enc, err := os.ReadFile(yedek1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := openBundle(enc, "Backup.Pass-2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var yb bundle
+	if err := json.Unmarshal(plain, &yb); err != nil {
+		t.Fatal(err)
+	}
+	if len(yb.Secrets) != len(degerler) {
+		t.Fatalf("backup holds %d secrets, expected %d", len(yb.Secrets), len(degerler))
+	}
+	for k, v := range degerler {
+		if yb.Secrets[k] != v {
+			t.Errorf("backup value of %s differs", k)
+		}
+		got, err := kcGet(k)
+		if err != nil || got != v {
+			t.Errorf("%s after migration: %q %v, expected %q", k, got, err, v)
+		}
+		// An empty value has no encrypted data for the ACL to guard.
+		if e := yabanciOku(t, service, k); v != "" && !strings.Contains(e, "-25293") {
+			t.Errorf("another process read the migrated %s or failed differently: %s", k, e)
+		}
+	}
+	if p, err := yedekParolaOku(); err != nil || p != eskiParola {
+		t.Fatalf("backup password after migration: %q %v", p, err)
+	}
+	// Attributes survived (label, kind, comment, service, account).
+	sonrakiOgeler, err := kcOgeler()
+	if err != nil || len(sonrakiOgeler) != toplam {
+		t.Fatalf("items after: %v %v", sonrakiOgeler, err)
+	}
+	var once, sonra []string
+	for _, o := range oncekiOgeler {
+		once = append(once, fmt.Sprintf("%+v", o))
+	}
+	for _, o := range sonrakiOgeler {
+		sonra = append(sonra, fmt.Sprintf("%+v", o))
+	}
+	sort.Strings(once)
+	sort.Strings(sonra)
+	if strings.Join(once, "\n") != strings.Join(sonra, "\n") {
+		t.Fatalf("attributes changed:\nbefore:\n%s\nafter:\n%s", strings.Join(once, "\n"), strings.Join(sonra, "\n"))
+	}
+	if d := aclDokumu(t); strings.Contains(d, "/usr/bin/security") {
+		t.Fatalf("/usr/bin/security is still in the ACL after migration:\n%s", d)
+	}
+
+	// Idempotent: the second run changes nothing and writes no backup.
+	rapor.Reset()
+	if s, err := aclGocur(&rapor, false, "Backup.Pass-2026", []string{filepath.Join(yedekDizin, "second.age")}); err != nil || s.bagli != toplam || s.tasindi != 0 {
+		t.Fatalf("second migration was not a no-op: %+v %v\n%s", s, err, rapor.String())
+	}
+	if _, err := os.Stat(filepath.Join(yedekDizin, "second.age")); err == nil {
+		t.Fatal("the no-op run wrote a backup")
+	}
+	if keys, err := kcList(); err != nil || len(keys) != len(degerler) {
 		t.Fatalf("ls: %v %v", keys, err)
 	}
-	if err := kcSet("old/cli", "updated-value"); err != nil {
-		t.Fatalf("CLI item could not be updated: %v", err)
+	for k := range degerler {
+		if k != "old/cli" {
+			if err := kcDelete(k); err != nil {
+				t.Fatalf("delete %s: %v", k, err)
+			}
+		}
 	}
-	if v, err := cliOku(t, service, "old/cli"); err != nil || v != "updated-value" {
-		t.Fatalf("updated value could not be read via the CLI: %q %v", v, err)
+	if err := kcSet("old/cli", "updated-value"); err != nil {
+		t.Fatalf("migrated item could not be updated: %v", err)
 	}
 	if v, _ := kcGet("old/cli"); v != "updated-value" {
 		t.Fatalf("updated value: %q", v)
 	}
 
-	// new -> old
+	// New items: bound to kasa from the start; no other process reads them.
 	if err := kcSet("new/item", "new value !$`\"'"); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := cliOku(t, service, "new/item"); err != nil || v != "new value !$`\"'" {
-		t.Fatalf("item written via the framework could not be read via the CLI: %q %v", v, err)
+	if e := yabanciOku(t, service, "new/item"); !strings.Contains(e, "-25293") {
+		t.Fatalf("another process read a new item or failed differently: %s", e)
+	}
+	if d := aclDokumu(t); strings.Contains(d, "/usr/bin/security") {
+		t.Fatalf("a new item trusts /usr/bin/security:\n%s", d)
 	}
 	if v, err := kcGet("new/item"); err != nil || v != "new value !$`\"'" {
 		t.Fatalf("item written via the framework could not be read from kasa: %q %v", v, err)
@@ -152,28 +342,23 @@ func TestGeriyeUyumCLIveFramework(t *testing.T) {
 	if err := kcDelete("old/cli"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cliOku(t, service, "old/cli"); err == nil {
-		t.Fatal("the deleted item can still be read via the CLI")
-	}
 	if _, err := kcGet("old/cli"); !errors.Is(err, errAnahtarYok) {
 		t.Fatalf("deleted item: %v", err)
 	}
 
-	// Backup password: an old password (9 characters, from before the 12-character
-	// rule) stored via the CLI -> the path export uses accepts it.
-	const eskiParola = "Qx.904417"
-	cliYaz(t, yedekParolaService, yedekParolaAccount, eskiParola)
+	// Backup password: stored under the 9-character rule, migrated above; the
+	// path export uses accepts it.
 	if p, kaynak, err := yedekParolasiCoz(); err != nil || p != eskiParola || kaynak != "keychain" {
 		t.Fatalf("old backup password was not accepted: %q %q %v", p, kaynak, err)
 	}
-	if yedekParolaKusuru(eskiParola) == "" {
-		t.Fatal("a 9-character password passed the NEW rule")
+	if yedekParolaKusuru(eskiParola) != "" {
+		t.Fatal("the test password should meet the new rule")
 	}
 	if err := yedekParolaYaz("New.Password-2026"); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := cliOku(t, yedekParolaService, yedekParolaAccount); err != nil || v != "New.Password-2026" {
-		t.Fatalf("new backup password could not be read via the CLI: %q %v", v, err)
+	if v, err := yedekParolaOku(); err != nil || v != "New.Password-2026" {
+		t.Fatalf("new backup password could not be read: %q %v", v, err)
 	}
 	if keys, _ := kcList(); len(keys) != 1 || keys[0] != "new/item" {
 		t.Fatalf("backup password showed up in kasa ls or the list is broken: %v", keys)
@@ -206,6 +391,31 @@ func TestGeriyeUyumCLIveFramework(t *testing.T) {
 	}
 	if v, err := kcGet("new/item"); err != nil || v != "new value !$`\"'" {
 		t.Fatalf("after unlocking: %q %v", v, err)
+	}
+}
+
+// A read-back that differs from the value written: the value held in memory is
+// written again at once, the migration reports an error and stops.
+func TestGocGeriOkumaUyusmazligi(t *testing.T) {
+	geciciKasa(t)
+	cliYaz(t, service, "mm/item", "right value")
+	o := ogeKaydi{svc: service, acct: "mm/item", etiket: service, tur: "kasa secret", aciklama: "managed by kasa"}
+	cagri := 0
+	eski := gocGeriOku
+	gocGeriOku = func(yol, svc, acct string) (string, error) {
+		cagri++
+		if cagri == 1 {
+			return "corrupted", nil
+		}
+		return eski(yol, svc, acct)
+	}
+	t.Cleanup(func() { gocGeriOku = eski })
+	err := ogeTasi(o, "right value")
+	if err == nil || !strings.Contains(err.Error(), "written again") {
+		t.Fatalf("a mismatch was not reported: %v", err)
+	}
+	if v, err := kcGet("mm/item"); err != nil || v != "right value" {
+		t.Fatalf("the value was not restored after the mismatch: %q %v", v, err)
 	}
 }
 
@@ -457,21 +667,6 @@ func TestDegerBaytBaytAyni(t *testing.T) {
 		}
 		if got != v {
 			t.Errorf("%s: wrote %q, read %q", k, v, got)
-		}
-	}
-}
-
-func TestParolaSatiriCoz(t *testing.T) {
-	durumlar := []struct{ girdi, beklenen string }{
-		{"password: \"abc\"\n", "abc"},
-		{"password: 0x7369666E  \"sifn\"\n", "sifn"},
-		{"password: \n", ""},
-		{"keychain: \"x\"\npassword: \"a\"b\"\n", `a"b`},
-	}
-	for _, d := range durumlar {
-		v, err := parolaSatiriCoz([]byte(d.girdi))
-		if err != nil || v != d.beklenen {
-			t.Errorf("%q -> %q, %v (expected %q)", d.girdi, v, err, d.beklenen)
 		}
 	}
 }

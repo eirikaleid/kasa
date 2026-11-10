@@ -7,7 +7,7 @@
 1. **Never ask the user to paste a secret** into the chat, a file, a command line or an environment variable. If a command needs a credential, use kasa.
 2. **Run commands that need secrets with `kasa run <profile> -- <command> [args]`.** The secrets are injected into that process as environment variables.
 3. **Never call `kasa get`.** It prints raw values and is for humans only. Do not try to work around it (no `security find-generic-password`, no reading the keychain, no reading `profiles.json` for values; it holds only references anyway).
-4. **Never run `kasa unlock`, `kasa rm`, `kasa which`, `kasa import` or `kasa backup-password set|rm`.** These are human-only.
+4. **Never run `kasa unlock`, `kasa rm`, `kasa which`, `kasa import`, `kasa acl` (migrate) or `kasa backup-password set|rm`.** These are human-only.
 5. **Exit code 75 means the keychain is locked.** Stop and ask the human to run `kasa unlock` (or `kasa unlock --gui`) in their own terminal, then retry. Do not loop.
 6. Do not edit `~/.config/kasa/profiles.json` to widen an allow list, add an interpreter such as `python3`, `bash` or `node`, or change a host, unless the human explicitly asked for that change.
 7. Never print, log, echo or write the environment of a `kasa run` process (`env`, `printenv`, `set`, `ps -E`).

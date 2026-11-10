@@ -40,7 +40,7 @@ func yedekParolaOku() (string, error) {
 	if err := kilitKapisi(); err != nil {
 		return "", err
 	}
-	return secOkuDeger(yedekParolaService, yedekParolaAccount)
+	return kcOkuYol(keychainPath(), yedekParolaService, yedekParolaAccount)
 }
 
 func yedekParolaSil() error {

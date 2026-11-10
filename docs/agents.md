@@ -6,7 +6,7 @@ kasa lets an agent run commands that need credentials without seeing the credent
 
 1. Never ask the user to paste a secret.
 2. Run credentialed commands with `kasa run <profile> -- <command>`.
-3. Never call `kasa get`, `kasa unlock`, `kasa rm`, `kasa which`, `kasa import`, or read the keychain with `security`.
+3. Never call `kasa get`, `kasa unlock`, `kasa rm`, `kasa which`, `kasa import`, `kasa acl`, or read the keychain with `security`.
 4. Exit code 75 means locked: ask the human to run `kasa unlock`.
 
 The same text is in [AGENTS.md](../AGENTS.md).
@@ -36,6 +36,7 @@ Add to `~/.claude/settings.json` (all projects) or `.claude/settings.json` (one 
       "Bash(kasa lookup:*)",
       "Bash(kasa unlock:*)",
       "Bash(kasa import:*)",
+      "Bash(kasa acl:*)",
       "Bash(security find-generic-password:*)"
     ]
   }
@@ -81,7 +82,7 @@ alwaysApply: true
 
 - Never ask the user to paste a secret (API key, token, password).
 - Run commands that need credentials as `kasa run <profile> -- <command>`.
-- Never run `kasa get`, `kasa unlock`, `kasa rm`, `kasa which` or `kasa import`, and never read the keychain with `security`.
+- Never run `kasa get`, `kasa unlock`, `kasa rm`, `kasa which`, `kasa import` or `kasa acl`, and never read the keychain with `security`.
 - If kasa exits with code 75 the keychain is locked: ask the user to run `kasa unlock` themselves.
 - Discover what exists with `kasa ls` and `kasa profile ls`.
 ```

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -109,72 +108,6 @@ func secBaytStderr(args ...string) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("%s", msg)
 	}
 	return out.Bytes(), errb.Bytes(), nil
-}
-
-// secOkuDeger: reads a single generic password value.
-//
-// Reading deliberately stays on the security CLI (the value is NOT in argv, it
-// is on the stdout pipe): old items written with `security
-// add-generic-password` have an ACL that trusts only /usr/bin/security; if
-// kasa itself reads through Security.framework, the keychain asks "allow
-// access" (errSecAuthFailed when interaction is disabled, measured on a
-// temporary keychain). Adding kasa to the ACL is not a fix: the signature
-// changes with every rebuild and the prompt comes back. New items are also
-// written with the same ACL (keychain_darwin.go guvenilenErisim).
-//
-// `-w` is NOT used: for a value containing unprintable bytes (UTF-8 non-ASCII
-// letters, newline, tab), security prints it as HEX with -w, which cannot be
-// told apart from a value that really is hex. `-g` instead gives the value on
-// stderr in two forms:
-//
-//	password: "plain value"
-//	password: 0x<HEX>  "<escaped representation>"
-//
-// the second is decoded from hex; so the value is always identical byte for byte.
-func secOkuDeger(svc, acct string) (string, error) {
-	out, errb, err := secBaytStderr("find-generic-password", "-s", svc, "-a", acct, "-g", keychainPath())
-	sifirlaBayt(out)
-	if err != nil {
-		sifirlaBayt(errb)
-		return "", err
-	}
-	v, perr := parolaSatiriCoz(errb)
-	sifirlaBayt(errb)
-	return v, perr
-}
-
-// parolaSatiriCoz: parses the "password:" line in the stderr of `security ... -g`.
-func parolaSatiriCoz(errb []byte) (string, error) {
-	const on = "password: "
-	s := string(errb)
-	i := strings.Index(s, on)
-	if i < 0 {
-		return "", fmt.Errorf("no password line in security output")
-	}
-	s = s[i+len(on):]
-	if strings.HasPrefix(s, "0x") {
-		h := s[2:]
-		if j := strings.IndexAny(h, " \n"); j >= 0 {
-			h = h[:j]
-		}
-		b, err := hex.DecodeString(h)
-		if err != nil {
-			return "", fmt.Errorf("could not decode security hex output")
-		}
-		v := string(b)
-		sifirlaBayt(b)
-		return v, nil
-	}
-	if j := strings.LastIndex(s, "\n"); j >= 0 {
-		s = s[:j]
-	}
-	if s == "" {
-		return "", nil
-	}
-	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
-		return "", fmt.Errorf("security password line has an unexpected format")
-	}
-	return s[1 : len(s)-1], nil
 }
 
 func kcCreate(password string) error {
@@ -298,7 +231,7 @@ func kcGet(key string) (string, error) {
 	if err := kilitKapisi(); err != nil {
 		return "", err
 	}
-	return secOkuDeger(service, key)
+	return kcOkuYol(keychainPath(), service, key)
 }
 
 func kcDelete(key string) error {
