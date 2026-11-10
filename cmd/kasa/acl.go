@@ -427,8 +427,11 @@ func gocYedekParolasi() (string, error) {
 }
 
 func cmdAcl(args []string) error {
+	if len(args) == 2 && args[0] == "devral" {
+		return aclDevral(args[1])
+	}
 	if len(args) == 0 || args[0] != "migrate" {
-		return fmt.Errorf("usage: kasa acl migrate [--dry-run] [--target <dir>]")
+		return fmt.Errorf("usage: kasa acl migrate [--dry-run] [--target <dir>]\n       kasa acl devral <backup.age>")
 	}
 	f := parseFlags(args[1:])
 	prova := f["dry-run"] == "true" || f["prova"] == "true"
@@ -478,5 +481,111 @@ func cmdAcl(args []string) error {
 		return err
 	}
 	audit("OK", "acl", "migrate", "")
+	return nil
+}
+
+// kasa acl devral <backup.age>: handover after an upgrade.
+//
+// macOS gives a keychain under ~/Library/Keychains/ partition lists. An item
+// written by kasa (self-signed, no Team ID) carries the writer's cdhash there,
+// so a kasa built from changed source cannot read or modify it, even signed
+// with the same certificate: the certificate-bound ACL is necessary, not
+// sufficient. It can still delete it. The public API offers no way to widen a
+// partition list without the private password variant, so the items are
+// handed over: the OLD kasa writes its encrypted backup (`kasa export <file>`),
+// this kasa opens it with the backup password and moves every item by
+// delete-and-rewrite with read-back (ogeTasi). The plaintext never leaves the
+// two kasa processes; on disk there is only the encrypted file, which stays
+// until the end. Items this kasa already reads with the same value are
+// skipped, so a rerun after an interruption continues where it stopped. The
+// backup-password item goes last, written with the password that just opened
+// the backup.
+func aclDevral(dosya string) error {
+	if err := requireHuman("acl", "devral"); err != nil {
+		return err
+	}
+	if err := requireKasa(); err != nil {
+		return err
+	}
+	if err := kilitKapisi(); err != nil {
+		return err
+	}
+	enc, err := os.ReadFile(expandHome(dosya))
+	if err != nil {
+		return err
+	}
+	parola, err := promptSecret("backup password: ")
+	if err != nil {
+		return err
+	}
+	plain, err := openBundle(enc, parola)
+	if err != nil {
+		return err
+	}
+	var b bundle
+	if err := json.Unmarshal(plain, &b); err != nil {
+		return fmt.Errorf("backup is corrupt: %w", err)
+	}
+	ogeler, err := kcOgeler()
+	if err != nil {
+		return err
+	}
+	yol := keychainPath()
+	tasi := func(o ogeKaydi, deger string) (bool, error) {
+		if v, err := kcOkuYol(yol, o.svc, o.acct); err == nil && v == deger {
+			return false, nil
+		}
+		if err := ogeTasi(o, deger); err != nil {
+			return false, fmt.Errorf("%s: %w", o.ad(), err)
+		}
+		return true, nil
+	}
+	var yp []ogeKaydi
+	var eksik []string
+	tasinan, ayni := 0, 0
+	for _, o := range ogeler {
+		if o.svc == yedekParolaService && o.acct == yedekParolaAccount {
+			yp = append(yp, o)
+			continue
+		}
+		if o.svc != service {
+			continue
+		}
+		v, ok := b.Secrets[o.acct]
+		if !ok {
+			eksik = append(eksik, o.acct)
+			continue
+		}
+		t, err := tasi(o, v)
+		if err != nil {
+			audit("FAIL", "acl", "devral", err.Error())
+			return err
+		}
+		if t {
+			tasinan++
+		} else {
+			ayni++
+		}
+	}
+	for _, o := range yp {
+		t, err := tasi(o, parola)
+		if err != nil {
+			audit("FAIL", "acl", "devral", err.Error())
+			return err
+		}
+		if t {
+			tasinan++
+		} else {
+			ayni++
+		}
+	}
+	fmt.Printf("handover: %d moved, %d already readable by this kasa\n", tasinan, ayni)
+	if len(eksik) > 0 {
+		sort.Strings(eksik)
+		audit("FAIL", "acl", "devral", "not in the backup: "+strings.Join(eksik, ","))
+		return fmt.Errorf("%d item(s) are not in the backup and were left as they are (this kasa cannot read them): %s\n"+
+			"  export again with the old kasa and rerun", len(eksik), strings.Join(eksik, ", "))
+	}
+	audit("OK", "acl", "devral", "")
 	return nil
 }

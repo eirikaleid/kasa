@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Production shape of the signing story (TestImzaliSertifikaYolu uses `go test
@@ -116,9 +120,119 @@ func TestUretimYenidenDerleme(t *testing.T) {
 			if out, err := e2eKasa(t, eski, "", "run", "p", "--", "/usr/bin/true"); err != nil {
 				t.Fatalf("old kasa reads its own item: %v\n%s", err, out)
 			}
-			if out, err := e2eKasa(t, yeni, "", "run", "p", "--", "/usr/bin/true"); err != nil {
-				t.Fatalf("the new build (other source, same certificate) cannot read: %v\n%s", err, out)
+			_, err := e2eKasa(t, yeni, "", "run", "p", "--", "/usr/bin/true")
+			if yer.ad == "tmp" {
+				if err != nil {
+					t.Fatalf("outside */Library/Keychains a rebuild reads: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("under */Library/Keychains a bare rebuild read the old build's item: the partition list is gone, revisit acl devral")
 			}
 		})
 	}
+}
+
+// e2eInsan: runs a command the way a human does: on a terminal (pty through
+// script(1)), with no agent markers in the environment, girdi typed in.
+func e2eInsan(t *testing.T, dir, girdi string, args ...string) (string, error) {
+	t.Helper()
+	var env []string
+	for _, e := range os.Environ() {
+		ad, _, _ := strings.Cut(e, "=")
+		if _, ok := ajanIsaretiAdi(ad); !ok {
+			env = append(env, e)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/script", append([]string{"-q", "/dev/null"}, args...)...)
+	cmd.Dir, cmd.Env, cmd.Stdin = dir, env, &yavasGirdi{satirlar: strings.SplitAfter(girdi, "\n")}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// TestUretimYukseltmeDevri: the upgrade path for a vault under
+// */Library/Keychains: the old kasa (installed with make install) writes the
+// items and the backup password; a plain `make install` of changed source
+// refuses and leaves the old kasa in place; the old kasa exports; `make
+// install DEVIR_YEDEK=` hands every item over; the new kasa reads all of
+// them, the backup password last; a rerun changes nothing.
+func TestUretimYukseltmeDevri(t *testing.T) {
+	kc1, kcp1 := e2eAnahtarlik(t, "cert1")
+	sha1, _, _ := e2eSertifika(t, kc1, kcp1)
+	srcA, srcB := e2eKaynak(t, ""), e2eKaynak(t, "9.9.9-rebuild")
+	ev := kanonikTemp(t)
+	vault := filepath.Join(ev, "Library", "Keychains", "kasa.keychain-db")
+	e2eUretimOrtami(t, vault, ev, "e2e/a", "e2e/b")
+	bindir := filepath.Join(t.TempDir(), "bin")
+	kur := func(src string, ekstra ...string) (string, error) {
+		args := []string{"make", "install", "BINDIR=" + bindir, "SIGN_IDENTITY=" + sha1, "SIGN_KEYCHAIN=" + kc1,
+			"LDFLAGS=-s -w -X main.testKeychainYolu=" + vault + " -X main.testEvDizini=" + ev}
+		return e2eInsan(t, src, strings.Join(ekstra[1:], ""), append(args, ekstra[0])...)
+	}
+	if out, err := kur(srcA, "DEVIR_ATLA=", ""); err != nil {
+		t.Fatalf("installing the old kasa: %v\n%s", err, out)
+	}
+	kasa := filepath.Join(bindir, "kasa")
+	for _, k := range []string{"e2e/a", "e2e/b"} {
+		if out, err := e2eKasa(t, kasa, "değer-"+k, "add", k, "--stdin"); err != nil {
+			t.Fatalf("old kasa add: %v\n%s", err, out)
+		}
+	}
+	const yp = "Backup.Pass-2026"
+	if out, err := e2eInsan(t, "", yp+"\n"+yp+"\n", kasa, "backup-password", "set"); err != nil {
+		t.Fatalf("backup-password set: %v\n%s", err, out)
+	}
+	eskiBayt, _ := os.ReadFile(kasa)
+
+	out, err := kur(srcB, "DEVIR_ATLA=", "")
+	if err == nil || !strings.Contains(out, "DEVIR_YEDEK") {
+		t.Fatalf("make install over another build must refuse without a handover: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(kasa); string(b) != string(eskiBayt) {
+		t.Fatal("the refused install replaced the old kasa")
+	}
+	yedek := filepath.Join(t.TempDir(), "devir.age")
+	if out, err := e2eInsan(t, "", "", kasa, "export", yedek); err != nil {
+		t.Fatalf("old kasa export: %v\n%s", err, out)
+	}
+	if out, err := kur(srcB, "DEVIR_YEDEK="+yedek, yp+"\n"); err != nil || !strings.Contains(out, "3 moved") {
+		t.Fatalf("make install DEVIR_YEDEK: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(kasa); string(b) == string(eskiBayt) {
+		t.Fatal("the new kasa was not installed")
+	}
+	if out, err := e2eKasa(t, kasa, "", "version"); err != nil || !strings.Contains(out, "9.9.9-rebuild") {
+		t.Fatalf("installed version: %v\n%s", err, out)
+	}
+	if out, err := e2eKasa(t, kasa, "", "run", "p", "--", "/usr/bin/true"); err != nil {
+		t.Fatalf("the new kasa cannot read the handed-over items: %v\n%s", err, out)
+	}
+	// export reads every item AND the stored backup password (no terminal here).
+	if out, err := e2eInsan(t, "", "", kasa, "export", filepath.Join(t.TempDir(), "yeni.age")); err != nil {
+		t.Fatalf("the new kasa cannot export (backup password not handed over?): %v\n%s", err, out)
+	}
+	if out, err := e2eInsan(t, "", yp+"\n", kasa, "acl", "devral", yedek); err != nil || !strings.Contains(out, "0 moved, 3 already") {
+		t.Fatalf("a rerun must change nothing: %v\n%s", err, out)
+	}
+}
+
+// yavasGirdi: types one line at a time after a pause. Typed ahead, a line is
+// flushed when the prompt switches the terminal to no-echo.
+type yavasGirdi struct{ satirlar []string }
+
+func (y *yavasGirdi) Read(p []byte) (int, error) {
+	for len(y.satirlar) > 0 && y.satirlar[0] == "" {
+		y.satirlar = y.satirlar[1:]
+	}
+	if len(y.satirlar) == 0 {
+		time.Sleep(time.Second)
+		return 0, io.EOF
+	}
+	time.Sleep(700 * time.Millisecond)
+	n := copy(p, y.satirlar[0])
+	y.satirlar[0] = y.satirlar[0][n:]
+	return n, nil
 }

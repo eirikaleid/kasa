@@ -61,7 +61,21 @@ cert:
 cert-hazir:
 	./contrib/cert-hazir.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")
 
+# An installed kasa that differs from this build owns the vault's items (macOS
+# partition list: its cdhash), so this build could not read them. Handover
+# first, then replace the binary; on failure the old kasa stays in place.
 install: build
+	@if [ -e "$(BINDIR)/kasa" ] && ! cmp -s kasa "$(BINDIR)/kasa" && [ "$(DEVIR_ATLA)" != "1" ]; then \
+		if [ -z "$(DEVIR_YEDEK)" ]; then \
+			echo "error: $(BINDIR)/kasa is another build; only it can read the vault's items. Handover:" >&2; \
+			echo "  1) $(BINDIR)/kasa unlock" >&2; \
+			echo "  2) $(BINDIR)/kasa export <file.age>      (the OLD kasa writes its encrypted backup)" >&2; \
+			echo "  3) make install DEVIR_YEDEK=<file.age>   (this build deletes and rewrites every item)" >&2; \
+			echo "  no vault / no items to keep: make install DEVIR_ATLA=1" >&2; \
+			exit 1; \
+		fi; \
+		./kasa acl devral "$(DEVIR_YEDEK)" || exit 1; \
+	fi
 	mkdir -p "$(BINDIR)"
 	cp kasa "$(BINDIR)/kasa.new" && mv -f "$(BINDIR)/kasa.new" "$(BINDIR)/kasa"
 	@echo "installed: $(BINDIR)/kasa"
