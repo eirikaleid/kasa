@@ -12,8 +12,9 @@
 # would be writable by the very agents kasa is guarding against.
 #
 # kasa is signed with a self-signed certificate (SIGN_IDENTITY, a SHA-1 written to
-# local.mk by `make cert`). The vault's items trust that certificate, not one
-# build, so a rebuild keeps reading them. Without a certificate the build FAILS
+# local.mk by `make cert`). The vault's items trust that certificate AND (macOS
+# partition list) the cdhash of the kasa that wrote them, so a changed build
+# needs the handover below (`make install DEVIR_YEDEK=`). Without a certificate the build FAILS
 # instead of silently signing ad-hoc: an ad-hoc kasa would lock itself out of
 # the vault on its next rebuild.
 #

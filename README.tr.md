@@ -163,6 +163,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa backup-password status\|set\|rm` | Saklanan yedek parolasını yönet | set/rm: insan |
 | `kasa import <dosya.age> [--overwrite]` | Yedeği bu makineye geri yükle | yalnız insan + TTY |
 | `kasa acl migrate [--dry-run] [--target <dizin>]` | 2.5.0 öncesi kalemleri kasa'nın kendi ACL'ine taşı (önce şifreli yedek alır, geri yükleme denetimi yapar) | yalnız insan |
+| `kasa acl devral <yedek.age>` | Yükseltme devri: eski kasa'nın şifreli dışa aktarımından her kalemi bu derleme okuyabilsin diye yeniden yaz (`make install DEVIR_YEDEK=` koşar) | yalnız insan |
 | `kasa version` | Sürümü yazdır | herkes |
 
 Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pass`. Eski Türkçe komut adları (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) gizli takma ad olarak hâlâ kabul edilir.
@@ -278,7 +279,17 @@ En az iki hedef tutun ve biri makineden ayrı olsun. Yedek bir git deposundaysa 
 
 ## Sertifika ve göç
 
-Kalemler, güvenilen tek uygulaması kasa'nın kendisi olan bir erişim listesiyle yazılır. Kayıt, kasa'nın belirlenmiş gereksinimini (`identifier "kasa" and certificate leaf = H"<sha1>"`) tutar: tek bir derlemeye değil sertifikanıza bağlıdır. Aynı sertifikayla imzalanmış yeniden derleme kasayı sorusuz okur; `/usr/bin/security`, ad-hoc bir kopya ya da sizin başka herhangi bir süreciniz `errSecAuthFailed` alır (etkileşim kapalı olduğundan pencere de açılmaz).
+Kalemler, güvenilen tek uygulaması kasa'nın kendisi olan bir erişim listesiyle yazılır. Kayıt, kasa'nın belirlenmiş gereksinimini (`identifier "kasa" and certificate leaf = H"<sha1>"`) tutar: `/usr/bin/security`, ad-hoc bir kopya ya da sizin başka herhangi bir süreciniz `errSecAuthFailed` alır (etkileşim kapalı olduğundan pencere de açılmaz).
+
+**Yeniden derleme kasayı kendiliğinden okumaz.** Kasa `~/Library/Keychains/` altındadır; macOS orada her kaleme bir partition list de verir. kasa'nın Team ID'si olmadığından bu liste kalemi yazan kasa'nın cdhash'ini tutar: kaynağı değişmiş bir derleme, aynı sertifikayla imzalı olsa da `errSecAuthFailed` alır (aynı kaynağın bayt-bayt aynı derlemesi okur). Açık API partition list'i genişletemez; bu yüzden yükseltme kalemleri devreder (2.6.0): kurulu kasa şifreli yedeğini yazar, yeni derleme her kalemi ondan silip yeniden yazar, yedek-parola kalemi en son. `make install` farklı bir kurulu kasa'nın üzerine devirsiz yazmayı reddeder, eskisi yerinde kalır:
+
+```bash
+~/.local/bin/kasa unlock
+~/.local/bin/kasa export ~/kasa-devir.age      # ESKİ kasa şifreli yedeğini yazar
+make install DEVIR_YEDEK=~/kasa-devir.age     # yedek parolasını sorar, her kalemi taşır, sonra kurar
+```
+
+Yarıda kalırsa kalem kaybolmaz: şifreli dosya durur, `kasa acl devral <dosya>` yeniden koşunca taşınmış kalemleri atlar. Kasa ya da korunacak kalem yoksa: `make install DEVIR_ATLA=1`.
 
 ### 2.5.0 öncesinden göç
 
@@ -300,7 +311,7 @@ Eski kalemler eski yolla okunur (`security find-generic-password -g`; eski ACL'n
 
 ### Sertifika kaybı
 
-1. **`.p12` elinizde.** `make cert-hazir && make install` çalıştırın (`.p12`'yi içe aktarır, parolasını sorar ve SHA-1'i `local.mk`'ye yazar; ya da kendiniz alın: `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın). Kimlik geri geldi; kalemler yeniden okunur. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
+1. **`.p12` elinizde.** `make cert-hazir && make install` çalıştırın (`.p12`'yi içe aktarır, parolasını sorar ve SHA-1'i `local.mk`'ye yazar; ya da kendiniz alın: `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın). Kimlik geri geldi; aynı kaynağın bayt-bayt aynı derlemesi kalemleri yeniden okur, başka bir derleme yukarıdaki devri ister. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
 2. **Sertifika tamamen kayıp.** Yenisini üretin ve kasayı şifreli yedekten yeniden kurun: kalemler yeni sertifikayla yazılır, eskiler önce kaldırılır.
 
 ```bash

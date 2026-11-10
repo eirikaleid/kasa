@@ -163,6 +163,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa backup-password status\|set\|rm` | Manage the stored backup password | set/rm: human |
 | `kasa import <file.age> [--overwrite]` | Restore a backup on this machine | human + TTY only |
 | `kasa acl migrate [--dry-run] [--target <dir>]` | Move items written before 2.5.0 to kasa's own ACL (takes an encrypted backup first, restore-checked) | human only |
+| `kasa acl devral <backup.age>` | Upgrade handover: rewrite every item from the old kasa's encrypted export so this build can read it (`make install DEVIR_YEDEK=` runs it) | human only |
 | `kasa version` | Print the version | anyone |
 
 Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pass`. The old Turkish command names (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) are still accepted as hidden aliases.
@@ -278,7 +279,17 @@ Keep at least two targets, and keep one of them off the machine. If a backup liv
 
 ## Signing certificate and migration
 
-Items are written with an access list whose only trusted application is kasa itself. The entry stores kasa's designated requirement, `identifier "kasa" and certificate leaf = H"<sha1>"`: it is tied to your certificate, not to one build, so a rebuild signed with the same certificate reads the vault without a prompt, while `/usr/bin/security`, an ad-hoc copy or any other process of yours gets `errSecAuthFailed` (interaction is disabled, so no dialog opens either).
+Items are written with an access list whose only trusted application is kasa itself. The entry stores kasa's designated requirement, `identifier "kasa" and certificate leaf = H"<sha1>"`: `/usr/bin/security`, an ad-hoc copy or any other process of yours gets `errSecAuthFailed` (interaction is disabled, so no dialog opens either).
+
+**A rebuild does not read the vault by itself.** The vault lives in `~/Library/Keychains/`, where macOS also gives every item a partition list. kasa has no Team ID, so that list names the cdhash of the kasa that wrote the item: a build from changed source, even signed with the same certificate, gets `errSecAuthFailed` (a byte-identical rebuild of the same source still reads). The public API cannot widen a partition list, so an upgrade hands the items over (2.6.0): the installed kasa writes its encrypted backup, the new build deletes and rewrites every item from it, the backup-password item last. `make install` refuses to replace a different installed kasa without it and leaves the old one in place:
+
+```bash
+~/.local/bin/kasa unlock
+~/.local/bin/kasa export ~/kasa-devir.age      # the OLD kasa writes its encrypted backup
+make install DEVIR_YEDEK=~/kasa-devir.age     # asks the backup password, moves every item, then installs
+```
+
+If it stops halfway nothing is lost: the encrypted file stays, and running `kasa acl devral <file>` again skips the items already moved. With no vault or no items to keep: `make install DEVIR_ATLA=1`.
 
 ### Migrating from before 2.5.0
 
@@ -300,7 +311,7 @@ The old items are read the old way (`security find-generic-password -g`, the onl
 
 ### Lost certificate
 
-1. **You still have the `.p12`.** Run `make cert-hazir && make install` (it imports the `.p12`, asks for its passphrase and writes the SHA-1 to `local.mk`; or import it yourself with `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it). The identity is back, so the items are readable again. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
+1. **You still have the `.p12`.** Run `make cert-hazir && make install` (it imports the `.p12`, asks for its passphrase and writes the SHA-1 to `local.mk`; or import it yourself with `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it). The identity is back; a byte-identical build of the same source reads the items again, any other build needs the handover above. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
 2. **The certificate is gone for good.** Make a new one and re-create the vault from the encrypted backup: items are written under the new certificate, the old ones are removed first.
 
 ```bash

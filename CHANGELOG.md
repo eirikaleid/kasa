@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.6.0 — 2026-11-10
+
+Correction: a rebuild signed with the same certificate does NOT read the vault (2.5.0 said it did).
+
+- **Cause, measured:** the vault lives in `~/Library/Keychains/`; macOS gives keychains there partition lists, and an item written by a Team-ID-less kasa names the writer's cdhash. A build from changed source gets `errSecAuthFailed` even with the same certificate and designated requirement; it can still delete the item. Keychains elsewhere (the 2.5.x tests used TMPDIR) have no partition list, which is why `TestImzaliSertifikaYolu` passed.
+- **`kasa acl devral <backup.age>`** (human only): opens the old kasa's encrypted export with the backup password, moves every item by delete-and-rewrite with read-back (the `acl migrate` routine), backup-password item last with the password that opened the file. Items already readable with the same value are skipped, so a rerun after an interruption continues; items missing from the backup are left alone and reported.
+- **`make install`:** if a different kasa is installed it refuses without `DEVIR_YEDEK=<file>` (prints the sequence) and leaves the old binary in place; with it, the new build runs `acl devral` before replacing the binary. `DEVIR_ATLA=1` skips (no vault).
+- **Rejected:** widening the partition list (only the private password variant can; for code without a Team ID there is no partition value that means "this certificate") and moving the vault out of `~/Library/Keychains` (relies on undocumented path behaviour, drops a macOS barrier).
+- Tests: `TestUretimYenidenDerleme` (real `make build` binaries of two source versions: rebuild reads in TMPDIR, gets -25293 under `*/Library/Keychains`), `TestUretimYukseltmeDevri` (make install refuses, old kasa exports, `make install DEVIR_YEDEK=` hands over, new kasa reads all items and the backup password, rerun changes nothing). `TestImzaliSertifikaYolu` builds in a copy without the checkout's `local.mk`.
+- Docs: README (EN/TR), SECURITY.md, Makefile comment.
+
 ## 2.5.1 — 2026-11-10
 
 New-machine setup: the signing certificate no longer has to be made by hand before the first build.
