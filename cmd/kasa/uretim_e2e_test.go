@@ -217,6 +217,10 @@ func TestUretimYukseltmeDevri(t *testing.T) {
 	if out, err := e2eInsan(t, "", yp+"\n", kasa, "acl", "devral", yedek); err != nil || !strings.Contains(out, "0 moved, 3 already") {
 		t.Fatalf("a rerun must change nothing: %v\n%s", err, out)
 	}
+	// Same source again: the same cdhash owns the items, no handover asked.
+	if out, err := kur(srcB, "DEVIR_ATLA=", ""); err != nil {
+		t.Fatalf("reinstalling the same source must not ask for a handover: %v\n%s", err, out)
+	}
 }
 
 // yavasGirdi: types one line at a time after a pause. Typed ahead, a line is

@@ -66,7 +66,9 @@ cert-hazir:
 # partition list: its cdhash), so this build could not read them. Handover
 # first, then replace the binary; on failure the old kasa stays in place.
 install: build
-	@if [ -e "$(BINDIR)/kasa" ] && ! cmp -s kasa "$(BINDIR)/kasa" && [ "$(DEVIR_ATLA)" != "1" ]; then \
+	@cdh() { codesign -dvvv "$$1" 2>&1 | sed -n 's/^CDHash=//p'; }; \
+	eski=$$(cdh "$(BINDIR)/kasa"); \
+	if [ -e "$(BINDIR)/kasa" ] && { [ -z "$$eski" ] || [ "$$eski" != "$$(cdh kasa)" ]; } && [ "$(DEVIR_ATLA)" != "1" ]; then \
 		if [ -z "$(DEVIR_YEDEK)" ]; then \
 			echo "error: $(BINDIR)/kasa is another build; only it can read the vault's items. Handover:" >&2; \
 			echo "  1) $(BINDIR)/kasa unlock" >&2; \
