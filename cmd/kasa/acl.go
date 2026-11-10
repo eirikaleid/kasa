@@ -440,7 +440,7 @@ func cmdAcl(args []string) error {
 		return fmt.Errorf("denied: only a human can migrate the vault's items")
 	}
 	if !imzaliMi() {
-		fmt.Fprintln(os.Stderr, "WARNING: this kasa is ad-hoc signed; migrated items become unreadable after the next rebuild. Run `make cert` and `make install` first.")
+		fmt.Fprintln(os.Stderr, "WARNING: this kasa is ad-hoc signed; migrated items become unreadable after the next rebuild. Run `make cert-hazir` and `make install` first.")
 	}
 	if err := kilitKapisi(); err != nil {
 		return err
