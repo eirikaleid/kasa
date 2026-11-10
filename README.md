@@ -15,6 +15,10 @@
   <img alt="AI-agent safe" src="https://img.shields.io/badge/AI--agent-safe-2ea44f">
 </p>
 
+> [!CAUTION]
+> **IMPORTANT: protect your signing certificate.**
+> The person who installs kasa creates a self-signed code-signing certificate (`make cert`). The vault's items trust that certificate, not one build of kasa. If you lose it, kasa can no longer read the vault, and nothing can read it for you: there is no master-password repair. Keep the encrypted `.p12` backup somewhere safe, off this machine too, and never share it: whoever holds it can pass as kasa. Recovery paths are under [Lost certificate](#lost-certificate).
+
 ## Why
 
 When you work with an AI coding agent (Claude Code, Codex, Cursor, Gemini CLI, ...), pasting a token into the chat writes it into the transcript permanently. It then lives in logs, history files and possibly provider-side storage, long after you have forgotten it.
@@ -28,12 +32,22 @@ Requires macOS and Go (cgo enabled, which is the default).
 ```bash
 git clone https://github.com/eirikaleid/kasa.git
 cd kasa
-make install                 # builds, ad-hoc signs, installs to ~/.local/bin/kasa
+make cert                    # once: signing certificate + encrypted .p12 backup (read the box above)
+make install                 # builds, signs with that certificate, installs to ~/.local/bin/kasa
 
 kasa init                    # once: choose a master password (only you know it)
 kasa add github/token        # value is prompted, hidden, never echoed
 kasa profile edit            # define which secrets go to which commands
 kasa run github -- gh pr list
+```
+
+`make cert` writes `SIGN_IDENTITY` to `local.mk` and refuses to run again while `local.mk` names a certificate. Without a certificate `make build` fails instead of signing ad-hoc (an ad-hoc kasa would lose the vault on its next rebuild). `make build ADHOC=1` does it deliberately, with a warning.
+
+**Upgrading from before 2.5.0:** items written by older versions trust `/usr/bin/security`, so any process of yours could read them. After `make cert` and `make install`, move them (human only, see [Migrating](#migrating-from-before-250) for the full sequence):
+
+```bash
+kasa acl migrate --dry-run   # report only
+kasa acl migrate             # encrypted backup first, then item by item
 ```
 
 Make sure `~/.local/bin` is on your `PATH`. A minimal `~/.config/kasa/profiles.json` for the example above:
@@ -146,6 +160,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa backup ls` | Show backups per target and how old they are | anyone |
 | `kasa backup-password status\|set\|rm` | Manage the stored backup password | set/rm: human |
 | `kasa import <file.age> [--overwrite]` | Restore a backup on this machine | human + TTY only |
+| `kasa acl migrate [--dry-run] [--target <dir>]` | Move items written before 2.5.0 to kasa's own ACL (takes an encrypted backup first, restore-checked) | human only |
 | `kasa version` | Print the version | anyone |
 
 Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pass`. The old Turkish command names (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) are still accepted as hidden aliases.
@@ -259,6 +274,43 @@ age -d kasa-backup-YYYYMMDD.age > contents.json
 
 Keep at least two targets, and keep one of them off the machine. If a backup lives in a git repository, the repository must be private and the password long: anyone with the file can try to crack it offline.
 
+## Signing certificate and migration
+
+Items are written with an access list whose only trusted application is kasa itself. The entry stores kasa's designated requirement, `identifier "kasa" and certificate leaf = H"<sha1>"`: it is tied to your certificate, not to one build, so a rebuild signed with the same certificate reads the vault without a prompt, while `/usr/bin/security`, an ad-hoc copy or any other process of yours gets `errSecAuthFailed` (interaction is disabled, so no dialog opens either).
+
+### Migrating from before 2.5.0
+
+Do this in your own terminal, in this order:
+
+```bash
+kasa target ls                      # a backup target must exist (kasa target add <dir>)
+kasa export                         # your usual encrypted backup, as an extra safety net
+make cert && make install           # certificate, signed build
+kasa unlock
+kasa acl migrate --dry-run          # lists every item: would move / skipped / ERROR
+kasa acl migrate                    # writes the encrypted backup, restore-checks it in a
+                                    # temporary keychain, then moves item by item
+kasa acl migrate                    # again: every item reports "skipped" (idempotent)
+kasa ls && kasa run <profile> -- <cmd>
+```
+
+The old items are read the old way (`security find-generic-password -g`, the only reader their ACL trusts), deleted, and written again with the same label, kind, comment, service and account and kasa's own ACL. Each item is read back with kasa and compared byte for byte; on a mismatch the value held in memory is written again at once and the run stops. The `kasa-yedek-parola` item moves last. Nothing is edited in place and no private API is used. If the backup cannot be written or restored, nothing is changed.
+
+### Lost certificate
+
+1. **You still have the `.p12`.** Import it into your login keychain (`security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it), run `make install` again. The identity is back, so the items are readable again. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
+2. **The certificate is gone for good.** Make a new one and re-create the vault from the encrypted backup: items are written under the new certificate, the old ones are removed first.
+
+```bash
+./contrib/make-cert.sh --force --p12 ~/kasa-signing-cert-2.p12   # a new certificate
+make install
+mv ~/Library/Keychains/kasa.keychain-db ~/kasa-old-vault.keychain-db   # the old items, unreadable
+kasa init && kasa unlock
+kasa import <your backup>.age       # items are written with the new ACL
+```
+
+Delete `~/kasa-old-vault.keychain-db` once `kasa ls` and a `kasa run` work. The master password does not recover items bound to a lost certificate.
+
 ## Security model
 
 In short: secrets sit in a separate, auto-locking keychain; raw reads are human-only; agents get values only through an allow-listed `kasa run` or a capability command; secrets and passwords are never placed in the arguments of any child process (writes go through Security.framework; reads come back over a pipe); `run` uses a fixed `PATH` and an environment allow-list; high-value secrets can use root-owned locked profiles; every access is audited.
@@ -299,6 +351,7 @@ Other targets: `make build`, `make test`, `make vet`, `make clean`.
 ## Known limitations
 
 - macOS only. kasa builds on the Security framework and the `security` keychain tooling.
+- kasa needs its signing certificate (see [Signing certificate and migration](#signing-certificate-and-migration)); without it, items written by kasa cannot be read.
 - The agent guard is best effort, not a security boundary (see [SECURITY.md](SECURITY.md)).
 - Unlocked profiles are a convenience; use locked profiles for high-value secrets.
 

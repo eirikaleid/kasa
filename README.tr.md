@@ -15,6 +15,10 @@
   <img alt="AI-agent safe" src="https://img.shields.io/badge/AI--agent-safe-2ea44f">
 </p>
 
+> [!CAUTION]
+> **ÖNEMLİ: imza sertifikanı koru.**
+> kasa'yı kuran kişi kendinden imzalı bir kod imzalama sertifikası oluşturur (`make cert`). Kasanın kalemleri tek bir derlemeye değil bu sertifikaya güvenir. Sertifikayı kaybedersen kasa artık kasayı okuyamaz ve ana parola bunu onarmaz. Şifreli `.p12` yedeğini güvenli bir yerde, bu makinenin dışında da sakla ve kimseyle paylaşma: sertifikaya sahip olan kasa kılığına girebilir. Kurtarma yolları [Sertifika kaybı](#sertifika-kaybı) bölümünde.
+
 ## Neden
 
 Bir yapay zekâ kod ajanıyla (Claude Code, Codex, Cursor, Gemini CLI, ...) çalışırken token'ı sohbete yapıştırmak onu transkripte kalıcı olarak yazar. Sonra log'larda, geçmiş dosyalarında ve belki sağlayıcı tarafında, siz unuttuktan çok sonra bile durur.
@@ -28,7 +32,8 @@ macOS ve Go gerekir (cgo açık olmalı; varsayılan zaten böyle).
 ```bash
 git clone https://github.com/eirikaleid/kasa.git
 cd kasa
-make install                 # derler, ad-hoc imzalar, ~/.local/bin/kasa'ya kurar
+make cert                    # bir kez: imza sertifikası + şifreli .p12 yedeği (yukarıdaki kutuyu oku)
+make install                 # derler, o sertifikayla imzalar, ~/.local/bin/kasa'ya kurar
 
 kasa init                    # bir kez: ana parolayı belirle (yalnızca sen bilirsin)
 kasa add github/token        # değer gizli sorulur, ekrana yazılmaz
@@ -66,6 +71,15 @@ kasa run github -- gh pr list
 <p align="center">
   <img src="assets/terminal-demo.svg" alt="Terminal gösterimi: sır ekleme, anahtar listeleme, ajanda get reddi, ajanda run başarısı" width="900">
 </p>
+
+`make cert`, `SIGN_IDENTITY` değerini `local.mk`'ye yazar; `local.mk` zaten bir sertifikayı adlandırıyorsa yeniden çalışmayı reddeder. Sertifika yoksa `make build` sessizce ad-hoc imzalamak yerine hata verir (ad-hoc bir kasa bir sonraki derlemede kasayı kaybeder). `make build ADHOC=1` bunu bilerek, uyarıyla yapar.
+
+**2.5.0 öncesinden yükseltme:** eski sürümlerin yazdığı kalemler `/usr/bin/security`'ye güvenir; yani sizin herhangi bir sürecinizin okuyabilmesi demektir. `make cert` ve `make install` sonrası taşıyın (yalnız insan; tam sıra için [2.5.0 öncesinden göç](#250-öncesinden-göç)):
+
+```bash
+kasa acl migrate --dry-run   # yalnız rapor
+kasa acl migrate             # önce şifreli yedek, sonra kalem kalem
+```
 
 ## Nasıl çalışır
 
@@ -146,6 +160,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa backup ls` | Hedef başına yedekleri ve yaşlarını göster | herkes |
 | `kasa backup-password status\|set\|rm` | Saklanan yedek parolasını yönet | set/rm: insan |
 | `kasa import <dosya.age> [--overwrite]` | Yedeği bu makineye geri yükle | yalnız insan + TTY |
+| `kasa acl migrate [--dry-run] [--target <dizin>]` | 2.5.0 öncesi kalemleri kasa'nın kendi ACL'ine taşı (önce şifreli yedek alır, geri yükleme denetimi yapar) | yalnız insan |
 | `kasa version` | Sürümü yazdır | herkes |
 
 Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pass`. Eski Türkçe komut adları (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) gizli takma ad olarak hâlâ kabul edilir.
@@ -259,6 +274,43 @@ age -d kasa-backup-YYYYMMDD.age > contents.json
 
 En az iki hedef tutun ve biri makineden ayrı olsun. Yedek bir git deposundaysa depo private olmalı, parola uzun olmalıdır: dosyaya erişen biri çevrimdışı kırmayı deneyebilir.
 
+## Sertifika ve göç
+
+Kalemler, güvenilen tek uygulaması kasa'nın kendisi olan bir erişim listesiyle yazılır. Kayıt, kasa'nın belirlenmiş gereksinimini (`identifier "kasa" and certificate leaf = H"<sha1>"`) tutar: tek bir derlemeye değil sertifikanıza bağlıdır. Aynı sertifikayla imzalanmış yeniden derleme kasayı sorusuz okur; `/usr/bin/security`, ad-hoc bir kopya ya da sizin başka herhangi bir süreciniz `errSecAuthFailed` alır (etkileşim kapalı olduğundan pencere de açılmaz).
+
+### 2.5.0 öncesinden göç
+
+Kendi terminalinizde, bu sırayla:
+
+```bash
+kasa target ls                      # bir yedek hedefi olmalı (kasa target add <dizin>)
+kasa export                         # her zamanki şifreli yedeğiniz, ek güvence olarak
+make cert && make install           # sertifika, imzalı derleme
+kasa unlock
+kasa acl migrate --dry-run          # her kalemi listeler: taşınacak / atlandı / ERROR
+kasa acl migrate                    # şifreli yedeği yazar, geçici anahtarlıkta geri yüklemeyi
+                                    # sınar, sonra kalem kalem taşır
+kasa acl migrate                    # yine: her kalem "skipped" der (idempotent)
+kasa ls && kasa run <profil> -- <komut>
+```
+
+Eski kalemler eski yolla okunur (`security find-generic-password -g`; eski ACL'nin güvendiği tek okuyucu), silinir ve aynı etiket, tür, açıklama, servis ve hesapla, kasa'nın kendi ACL'iyle yeniden yazılır. Her kalem kasa ile geri okunup bayt bayt karşılaştırılır; uyuşmazlıkta bellekteki değer hemen yeniden yazılır ve işlem durur. `kasa-yedek-parola` kalemi en son taşınır. Hiçbir şey yerinde düzenlenmez, özel API kullanılmaz. Yedek yazılamaz ya da geri yüklenemezse hiçbir şey değişmez.
+
+### Sertifika kaybı
+
+1. **`.p12` elinizde.** Giriş anahtarlığınıza alın (`security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın), `make install`'u yeniden çalıştırın. Kimlik geri geldi; kalemler yeniden okunur. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
+2. **Sertifika tamamen kayıp.** Yenisini üretin ve kasayı şifreli yedekten yeniden kurun: kalemler yeni sertifikayla yazılır, eskiler önce kaldırılır.
+
+```bash
+./contrib/make-cert.sh --force --p12 ~/kasa-signing-cert-2.p12   # yeni sertifika
+make install
+mv ~/Library/Keychains/kasa.keychain-db ~/kasa-old-vault.keychain-db   # eski, okunamayan kalemler
+kasa init && kasa unlock
+kasa import <yedeğiniz>.age         # kalemler yeni ACL ile yazılır
+```
+
+`kasa ls` ve bir `kasa run` çalışınca `~/kasa-old-vault.keychain-db` dosyasını silin. Ana parola, kayıp sertifikaya bağlı kalemleri kurtarmaz.
+
 ## Güvenlik modeli
 
 Kısaca: sırlar ayrı, otomatik kilitlenen bir keychain'de durur; ham okuma yalnızca insana açıktır; ajanlar değerlere yalnızca allow listeli `kasa run` ya da yetenek komutlarıyla ulaşır; sırlar ve parolalar hiçbir alt sürecin argümanlarına girmez (yazma Security.framework üzerinden, okuma boru üzerinden döner); `run` sabit `PATH` ve ortam beyaz listesi kullanır; yüksek değerli sırlar root sahipli kilitli profillerle korunabilir; her erişim denetim günlüğüne yazılır.
@@ -299,6 +351,7 @@ Diğer hedefler: `make build`, `make test`, `make vet`, `make clean`.
 ## Bilinen sınırlamalar
 
 - Yalnızca macOS. kasa, Security framework'üne ve `security` keychain araçlarına dayanır.
+- kasa'nın imza sertifikasına ihtiyacı vardır ([Sertifika ve göç](#sertifika-ve-göç)); onsuz kasa'nın yazdığı kalemler okunamaz.
 - Ajan guard'ı en iyi çabalıdır, güvenlik sınırı değildir ([SECURITY.md](SECURITY.md)).
 - Kilitli olmayan profiller kolaylıktır; yüksek değerli sırlar için kilitli profil kullanın.
 

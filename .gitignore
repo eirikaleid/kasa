@@ -13,3 +13,9 @@
 *.keychain-db
 profiles.json
 audit.log
+
+# Signing certificate material must never be committed
+*.p12
+*.pfx
+*.pem
+*.key

@@ -132,8 +132,7 @@ func usage() {
                                 keep the export password in the keychain  [set: human only]
   kasa import <file.age>        restore a backup onto this machine  [after init+unlock]
 
-  kasa acl migrate [--dry-run]  bind items written before 2.5.0 to this kasa only  [human only, master password]
-  kasa acl repair  [--dry-run]  rebind all items after the signing certificate changed  [human only, master password]
+  kasa acl migrate [--dry-run]  move items written before 2.5.0 to this kasa's own ACL  [human only; takes a backup first]
 
 Key format: <namespace>/<name>  e.g. mail/pass, github/token, stripe/live_key
 `)

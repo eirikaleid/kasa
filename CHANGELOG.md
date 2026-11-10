@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.5.0 — 2026-11-10
+
+Keychain items now trust only kasa itself, not `/usr/bin/security`.
+
+- **Item ACL = kasa only.** New items are written with an access list holding just the running kasa. Its designated requirement is tied to your signing certificate (`identifier kasa and certificate leaf = H"<sha1>"`), not to one build, so a rebuild signed with the same certificate reads without a prompt. `/usr/bin/security`, ad-hoc copies and other same-user processes get `errSecAuthFailed` (keychain interaction is disabled, so no dialog).
+- **Reads in-process.** Values are read through Security.framework, not through a `security find-generic-password` subprocess; byte-for-byte tests cover UTF-8, newlines, tabs, quotes and hex-looking values.
+- **`make cert`** (`contrib/make-cert.sh`): creates a self-signed code-signing certificate, imports it with `-T /usr/bin/codesign`, writes an encrypted `.p12` backup, records `SIGN_IDENTITY` in `local.mk`; temporary key files are removed. `--keychain` targets another keychain (tests); `--force` makes a new certificate. **Keep the `.p12` safe and private.**
+- **Makefile:** `make build`/`install` sign with `SIGN_IDENTITY` and fail with a hint to run `make cert` when it is missing; ad-hoc signing only with an explicit `ADHOC=1` (prints a warning).
+- **`kasa acl migrate [--dry-run]`** (human only): moves items written before 2.5.0 to the new access list. It takes an encrypted backup first and restores it into a temporary keychain to verify it (otherwise nothing changes), then per item reads the old way, deletes it and rewrites it with the same label, kind, comment, service and account and kasa's own ACL, and compares a read-back byte for byte (on a mismatch it rewrites the in-memory value and stops). The backup-password item goes last. Idempotent: bound items are skipped. No in-place ACL editing and no private APIs are used.
+- **Certificate loss:** restore the `.p12`, or create a new certificate and `kasa import` from an encrypted backup. The master password does not repair it. Covered end to end in temporary keychains.
+- Tests: signed-rebuild, ad-hoc-refused, `.p12`-restore and new-certificate recovery in temporary keychains (no GUI windows, never the login keychain or the real vault).
+- Docs: README (EN/TR) caution box and migration section, SECURITY.md threat model, AGENTS.md (`kasa acl` is human-only).
+
+**Upgrade:** `make cert` → `make install` → `kasa unlock` → `kasa acl migrate --dry-run` → `kasa acl migrate`. Take a `kasa export` backup first.
+
 ## 2.4.0 — 2026-11-10
 
 Behaviour changes, from an independent audit:

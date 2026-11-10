@@ -3,3 +3,6 @@
 # A value given on the command line (make install DEV_ROOT=...) still wins.
 TRUSTED_DIRS = ~/bin
 DEV_ROOT = ~/src
+# `make cert` writes SIGN_IDENTITY (the SHA-1 of your signing certificate) here
+# for you. Do not copy a value from someone else: items trust YOUR certificate.
+# SIGN_IDENTITY = 0123456789ABCDEF0123456789ABCDEF01234567
