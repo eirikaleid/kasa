@@ -17,7 +17,7 @@
 
 > [!CAUTION]
 > **ÖNEMLİ: imza sertifikanı koru.**
-> kasa'yı kuran kişi kendinden imzalı bir kod imzalama sertifikası oluşturur (`make cert`). Kasanın kalemleri bu sertifikaya ve macOS partition list'i yoluyla onları yazan kasa derlemesine güvenir: yükseltme kalemleri devreder (`make install DEVIR_YEDEK=`). Sertifikayı kaybedersen kasa artık kasayı okuyamaz ve ana parola bunu onarmaz. Şifreli `.p12` yedeğini güvenli bir yerde, bu makinenin dışında da sakla ve kimseyle paylaşma: sertifikaya sahip olan kasa kılığına girebilir. Kurtarma yolları [Sertifika kaybı](#sertifika-kaybı) bölümünde.
+> kasa'yı kuran kişi kendinden imzalı bir kod imzalama sertifikası oluşturur (`make cert`). Kasanın kalemleri bu sertifikaya güvenir; onunla imzalı her derleme okur (kasa, macOS'un kalemi yazan derlemeye bağlayacağı `~/Library/Keychains` dışındadır; 2.5.x'ten geçiş: [Sertifika ve göç](#sertifika-ve-göç)). Sertifikayı kaybedersen kasa artık kasayı okuyamaz ve ana parola bunu onarmaz. Şifreli `.p12` yedeğini güvenli bir yerde, bu makinenin dışında da sakla ve kimseyle paylaşma: sertifikaya sahip olan kasa kılığına girebilir. Kurtarma yolları [Sertifika kaybı](#sertifika-kaybı) bölümünde.
 
 ## Neden
 
@@ -72,7 +72,7 @@ kasa run github -- gh pr list
   <img src="assets/terminal-demo.svg" alt="Terminal gösterimi: sır ekleme, anahtar listeleme, ajanda get reddi, ajanda run başarısı" width="900">
 </p>
 
-**Yeni makinede** (etkileşimsiz bir kurulum betiğinden de) `make cert-hazir && make install` çalıştırın. `make cert-hazir` idempotenttir: `local.mk` anahtarlıkta bulunan bir `SIGN_IDENTITY` adlandırıyorsa hiçbir şey yapmaz; yoksa ve `.p12` yedeği varsa (`CERT_P12=<dosya>`, varsayılan `~/kasa-signing-cert.p12`) onu içe aktarır ve SHA-1'ini `local.mk`'ye yazar: geri yüklenen sertifika hep sahip olduğu SHA-1'e sahiptir; aynı kaynağın bayt-bayt aynı derlemesi kasadaki mevcut kalemleri okur (başka derleme devir ister). Yedek de yoksa **yeni** bir sertifika üretir (`make cert` yolu); bu, mevcut bir kasanın kalemlerini okuyamaz (`kasa import` gerekir). `.p12` parolası `KASA_CERT_P12_PASSPHRASE`'den alınır ya da `/dev/tty`'den gizli okunur; ikisi de yoksa betik hatayla durur. Parola hiçbir zaman komut satırına girmez. `KEYCHAIN=<dosya>` başka bir anahtarlığı hedefler.
+**Yeni makinede** (etkileşimsiz bir kurulum betiğinden de) `make cert-hazir && make install` çalıştırın. `make cert-hazir` idempotenttir: `local.mk` anahtarlıkta bulunan bir `SIGN_IDENTITY` adlandırıyorsa hiçbir şey yapmaz; yoksa ve `.p12` yedeği varsa (`CERT_P12=<dosya>`, varsayılan `~/kasa-signing-cert.p12`) onu içe aktarır ve SHA-1'ini `local.mk`'ye yazar: geri yüklenen sertifika hep sahip olduğu SHA-1'e sahiptir; onunla imzalı bir derleme kasadaki mevcut kalemleri okur. Yedek de yoksa **yeni** bir sertifika üretir (`make cert` yolu); bu, mevcut bir kasanın kalemlerini okuyamaz (`kasa import` gerekir). `.p12` parolası `KASA_CERT_P12_PASSPHRASE`'den alınır ya da `/dev/tty`'den gizli okunur; ikisi de yoksa betik hatayla durur. Parola hiçbir zaman komut satırına girmez. `KEYCHAIN=<dosya>` başka bir anahtarlığı hedefler.
 
 `make cert`, `SIGN_IDENTITY` değerini `local.mk`'ye yazar; `local.mk` zaten bir sertifikayı adlandırıyorsa yeniden çalışmayı reddeder. Sertifika yoksa `make build` sessizce ad-hoc imzalamak yerine hata verir (ad-hoc bir kasa bir sonraki derlemede kasayı kaybeder). `make build ADHOC=1` bunu bilerek, uyarıyla yapar.
 
@@ -89,7 +89,7 @@ kasa acl migrate             # önce şifreli yedek, sonra kalem kalem
   <img src="assets/how-it-works.svg" alt="İnsan ayrı bir keychain'i açar. Ajanlar sırlara yalnızca kasa run (allow listesi ve ortam beyaz listesi) ya da mail send gibi yetenek komutlarıyla ulaşır; kasa get reddedilir." width="900">
 </p>
 
-Sırlar login keychain'inde değil, ayrı bir keychain'de durur (`~/Library/Keychains/kasa.keychain-db`). 12 saat işlem olmazsa otomatik kilitlenir; kilitliyken kimse bir şey okuyamaz. Ajanlar sırları iki yolla kullanabilir ve ikisi de değeri açığa çıkarmaz:
+Sırlar login keychain'inde değil, ayrı bir keychain'de durur (`~/Library/Application Support/kasa/kasa.keychain-db`). 12 saat işlem olmazsa otomatik kilitlenir; kilitliyken kimse bir şey okuyamaz. Ajanlar sırları iki yolla kullanabilir ve ikisi de değeri açığa çıkarmaz:
 
 1. **`kasa run <profil> -- <komut>`** komutu tam yola çözer, profilin `allow` listesiyle karşılaştırır, asgari bir ortam kurar ([Profiller](#profiller)) ve sırları ekleyerek komutu çalıştırır. Serbest komut kabul edilmez. stdout ve stderr'in ikisi de terminalse komut kasa'nın yerine geçer (`exec`); değilse de komut kasa'nın yerine geçer (aynı PID; `alarm`, `kill -9` ve çıkış kodu doğrudan ona ulaşır), terminal olmayan çıktıdaki her sır değerini (6 bayt ve üstü) ayrı bir maskeleme süreci `***` ile değiştirir. Doğrudan dosyaya yönlendirilen çıktı, komut bittikten kısa bir süre sonra tamamlanabilir. Bu yalnız kazara sızmayı yakalar, kasıtlı sızmayı (base64, harf harf) yakalamaz.
 2. **Yetenek komutları** (`kasa mail send` gibi) sırrı `kasa` sürecinin içinde kullanır, dışarı vermez.
@@ -163,7 +163,9 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa backup-password status\|set\|rm` | Saklanan yedek parolasını yönet | set/rm: insan |
 | `kasa import <dosya.age> [--overwrite]` | Yedeği bu makineye geri yükle | yalnız insan + TTY |
 | `kasa acl migrate [--dry-run] [--target <dizin>]` | 2.5.0 öncesi kalemleri kasa'nın kendi ACL'ine taşı (önce şifreli yedek alır, geri yükleme denetimi yapar) | yalnız insan |
-| `kasa acl devral <yedek.age>` | Yükseltme devri: eski kasa'nın şifreli dışa aktarımından her kalemi bu derleme okuyabilsin diye yeniden yaz (`make install DEVIR_YEDEK=` koşar) | yalnız insan |
+| `kasa acl tasi <yedek.age>` | 2.5.x yükseltmesi: eski kasa'nın (`~/Library/Keychains/`) şifreli dışa aktarımından her kalemi yeni yerdeki yeni kasaya yaz; eski dosya `.eski` kalır (`make install DEVIR_YEDEK=` koşar) | yalnız insan |
+| `kasa acl devral <yedek.age>` | Kasadaki her kalemi şifreli dışa aktarımdan yerinde yeniden yaz, bu derleme okuyabilsin (`acl yokla` okunamıyor derse yedek yol) | yalnız insan |
+| `kasa acl yokla` | Bu derleme kasanın kalemlerini okuyabiliyor mu? Tek satır, değer yok; çıkış 0 tamam / sınanamadı, 1 okunamıyor, 2 kasa eski yerde (`make install` kapısı) | herkes |
 | `kasa version` | Sürümü yazdır | herkes |
 
 Anahtarlar `<alan>/<ad>` biçimindedir, örneğin `github/token` ya da `mail/pass`. Eski Türkçe komut adları (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) gizli takma ad olarak hâlâ kabul edilir.
@@ -281,15 +283,22 @@ En az iki hedef tutun ve biri makineden ayrı olsun. Yedek bir git deposundaysa 
 
 Kalemler, güvenilen tek uygulaması kasa'nın kendisi olan bir erişim listesiyle yazılır. Kayıt, kasa'nın belirlenmiş gereksinimini (`identifier "kasa" and certificate leaf = H"<sha1>"`) tutar: `/usr/bin/security`, ad-hoc bir kopya ya da sizin başka herhangi bir süreciniz `errSecAuthFailed` alır (etkileşim kapalı olduğundan pencere de açılmaz).
 
-**Yeniden derleme kasayı kendiliğinden okumaz.** Kasa `~/Library/Keychains/` altındadır; macOS orada her kaleme bir partition list de verir. kasa'nın Team ID'si olmadığından bu liste kalemi yazan kasa'nın cdhash'ini tutar: kaynağı değişmiş bir derleme, aynı sertifikayla imzalı olsa da `errSecAuthFailed` alır (aynı kaynağın bayt-bayt aynı derlemesi okur). Açık API partition list'i genişletemez; bu yüzden yükseltme kalemleri devreder (2.6.0): kurulu kasa şifreli yedeğini yazar, yeni derleme her kalemi ondan silip yeniden yazar, yedek-parola kalemi en son. `make install` farklı bir kurulu kasa'nın üzerine devirsiz yazmayı reddeder, eskisi yerinde kalır:
+**Yeniden derleme kasayı devirsiz okur (2.6.0).** Kasa `~/Library/Application Support/kasa/` altındadır. macOS, `~/Library/Keychains/` altındaki anahtarlıkta her kaleme, onu yazan kasa'nın cdhash'ini adlandıran bir partition list verir; kasa'nın Team ID'si yok, bu yüzden kaynağı değişmiş bir derleme orada aynı sertifikayla bile `errSecAuthFailed` aldı (2.5.x orada duruyordu, yeniden derlenemiyordu). Başka yerde kalemde partition list yoktur, sertifikaya bağlı erişim listesi yeter: aynı sertifika ve designated requirement ile imzalı her derleme okur, ad-hoc kopya ve `/usr/bin/security` hâlâ -25293 alır. Bu, macOS'un gözlenen ama belgelenmemiş davranışıdır; `TestUretimYenidenDerleme` sabitler, `make install` her seferinde `kasa acl yokla` ile (gerçek bir kalemi dener, değer yazmaz) yeniden denetler. Tam belgelenmiş tek kalıcı çözüm Team ID'li imzadır (ücretli Apple Developer hesabı).
+
+### 2.5.x'ten yükseltme (kasa `~/Library/Keychains/` altında)
+
+Elle taşınan anahtarlık dosyası kalemlerinin partition list'ini korur (ölçüldü); bu yüzden kalemler yeni bir kasaya yeniden yazılır. Kendi terminalinizde, bu sırayla, bir kez:
 
 ```bash
 ~/.local/bin/kasa unlock
-~/.local/bin/kasa export ~/kasa-devir.age      # ESKİ kasa şifreli yedeğini yazar
-make install DEVIR_YEDEK=~/kasa-devir.age     # yedek parolasını sorar, her kalemi taşır, sonra kurar
+~/.local/bin/kasa export ~/kasa-devir.age     # ESKİ kasa şifreli yedeğini yazar
+make install DEVIR_YEDEK=~/kasa-devir.age     # yedek parolasını, sonra YENİ ana parolayı (iki kez) sorar,
+                                              # her kalemi yeni kasaya yazar, eski dosyayı
+                                              # kasa.keychain-db.eski yapar, kurar
+kasa version && kasa export                   # 2.6.0; her kalem ve yedek parola okunuyor
 ```
 
-Yarıda kalırsa kalem kaybolmaz: şifreli dosya durur, `kasa acl devral <dosya>` yeniden koşunca taşınmış kalemleri atlar. Kasa ya da korunacak kalem yoksa: `make install DEVIR_ATLA=1`.
+`kasa export` çalışınca `~/kasa-devir.age` ve `.eski` dosyasını silin. Yarıda kalırsa kalem kaybolmaz: eski kasa, her kalem yenisine girene kadar dokunulmaz; `./kasa acl tasi ~/kasa-devir.age` yeniden koşulur, yeni kasayı kullanır ve eşit kalemleri atlar. Taşıma bitene kadar bu kasa her komuta boş kasa açmak yerine eski yeri ve bu yönergeyi söyler. Sonraki yeniden derlemeler (`make install`) bunların hiçbirini istemez; yoklama bir gün kalemleri okunamaz bulursa (örn. macOS değişirse) `make install` yine `DEVIR_YEDEK=` ister ve `kasa acl devral <dosya>` kalemleri yerinde yeniden yazar. Kasa ya da korunacak kalem yoksa: `make install DEVIR_ATLA=1`.
 
 ### 2.5.0 öncesinden göç
 
@@ -311,13 +320,13 @@ Eski kalemler eski yolla okunur (`security find-generic-password -g`; eski ACL'n
 
 ### Sertifika kaybı
 
-1. **`.p12` elinizde.** `make cert-hazir && make install` çalıştırın (`.p12`'yi içe aktarır, parolasını sorar ve SHA-1'i `local.mk`'ye yazar; ya da kendiniz alın: `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın). Kimlik geri geldi; aynı kaynağın bayt-bayt aynı derlemesi kalemleri yeniden okur, başka bir derleme yukarıdaki devri ister. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
+1. **`.p12` elinizde.** `make cert-hazir && make install` çalıştırın (`.p12`'yi içe aktarır, parolasını sorar ve SHA-1'i `local.mk`'ye yazar; ya da kendiniz alın: `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın). Kimlik geri geldi; kalemler yeniden okunur. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
 2. **Sertifika tamamen kayıp.** Yenisini üretin ve kasayı şifreli yedekten yeniden kurun: kalemler yeni sertifikayla yazılır, eskiler önce kaldırılır.
 
 ```bash
 ./contrib/make-cert.sh --force --p12 ~/kasa-signing-cert-2.p12   # yeni sertifika
 make install
-mv ~/Library/Keychains/kasa.keychain-db ~/kasa-old-vault.keychain-db   # eski, okunamayan kalemler
+mv ~/Library/Application\ Support/kasa/kasa.keychain-db ~/kasa-old-vault.keychain-db   # eski, okunamayan kalemler
 kasa init && kasa unlock
 kasa import <yedeğiniz>.age         # kalemler yeni ACL ile yazılır
 ```

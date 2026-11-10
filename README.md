@@ -17,7 +17,7 @@
 
 > [!CAUTION]
 > **IMPORTANT: protect your signing certificate.**
-> The person who installs kasa creates a self-signed code-signing certificate (`make cert`). The vault's items trust that certificate and, through the macOS partition list, the kasa build that wrote them: an upgrade hands them over (`make install DEVIR_YEDEK=`, see [Signing certificate and migration](#signing-certificate-and-migration)). If you lose it, kasa can no longer read the vault, and nothing can read it for you: there is no master-password repair. Keep the encrypted `.p12` backup somewhere safe, off this machine too, and never share it: whoever holds it can pass as kasa. Recovery paths are under [Lost certificate](#lost-certificate).
+> The person who installs kasa creates a self-signed code-signing certificate (`make cert`). The vault's items trust that certificate, so any build signed with it reads them (the vault sits outside `~/Library/Keychains`, where macOS would bind items to the writing build; moving from 2.5.x: [Signing certificate and migration](#signing-certificate-and-migration)). If you lose it, kasa can no longer read the vault, and nothing can read it for you: there is no master-password repair. Keep the encrypted `.p12` backup somewhere safe, off this machine too, and never share it: whoever holds it can pass as kasa. Recovery paths are under [Lost certificate](#lost-certificate).
 
 ## Why
 
@@ -41,7 +41,7 @@ kasa profile edit            # define which secrets go to which commands
 kasa run github -- gh pr list
 ```
 
-**On a new machine** (also from a non-interactive setup script) run `make cert-hazir && make install`. `make cert-hazir` is idempotent: if `local.mk` names a `SIGN_IDENTITY` that is in the keychain it does nothing; otherwise, if the `.p12` backup exists (`CERT_P12=<file>`, default `~/kasa-signing-cert.p12`), it imports it and writes its SHA-1 to `local.mk`: the restored certificate has the SHA-1 it always had, so a byte-identical build of the same source reads the vault's existing items (any other build needs the handover). Only when there is no backup does it create a **new** certificate (the `make cert` path), which cannot read items of an existing vault (`kasa import` needed). The `.p12` passphrase is taken from `KASA_CERT_P12_PASSPHRASE` or read hidden from `/dev/tty`; with neither, the script stops with an error. It never goes on a command line. `KEYCHAIN=<file>` targets another keychain.
+**On a new machine** (also from a non-interactive setup script) run `make cert-hazir && make install`. `make cert-hazir` is idempotent: if `local.mk` names a `SIGN_IDENTITY` that is in the keychain it does nothing; otherwise, if the `.p12` backup exists (`CERT_P12=<file>`, default `~/kasa-signing-cert.p12`), it imports it and writes its SHA-1 to `local.mk`: the restored certificate has the SHA-1 it always had, so a build signed with it reads the vault's existing items. Only when there is no backup does it create a **new** certificate (the `make cert` path), which cannot read items of an existing vault (`kasa import` needed). The `.p12` passphrase is taken from `KASA_CERT_P12_PASSPHRASE` or read hidden from `/dev/tty`; with neither, the script stops with an error. It never goes on a command line. `KEYCHAIN=<file>` targets another keychain.
 
 `make cert` writes `SIGN_IDENTITY` to `local.mk` and refuses to run again while `local.mk` names a certificate. Without a certificate `make build` fails instead of signing ad-hoc (an ad-hoc kasa would lose the vault on its next rebuild). `make build ADHOC=1` does it deliberately, with a warning.
 
@@ -89,7 +89,7 @@ Make sure `~/.local/bin` is on your `PATH`. A minimal `~/.config/kasa/profiles.j
   <img src="assets/how-it-works.svg" alt="A human unlocks a separate keychain. Agents can reach secrets only through kasa run (allow list plus environment allow-list) or capability commands such as mail send; kasa get is refused." width="900">
 </p>
 
-Secrets live in a dedicated keychain (`~/Library/Keychains/kasa.keychain-db`), not in your login keychain. It auto-locks after 12 hours of inactivity; while it is locked nobody can read anything. Agents can use secrets in two ways, and neither reveals the value:
+Secrets live in a dedicated keychain (`~/Library/Application Support/kasa/kasa.keychain-db`), not in your login keychain. It auto-locks after 12 hours of inactivity; while it is locked nobody can read anything. Agents can use secrets in two ways, and neither reveals the value:
 
 1. **`kasa run <profile> -- <cmd>`** resolves `<cmd>` to a full path, checks it against the profile's `allow` list, builds a minimal environment (see [Profiles](#profiles)) and runs the command with the secrets added. Free-form commands are refused. If stdout and stderr are both terminals the command replaces kasa (`exec`); otherwise it still replaces kasa (same PID, so `alarm`, `kill -9` and the exit status reach it directly), and a masking side process replaces every secret value (6 bytes or more) in the non-terminal output with `***`. Output redirected straight to a file can finish a moment after the command exits. This catches accidental leaks only, not deliberate ones (base64, character by character).
 2. **Capability commands** such as `kasa mail send` use the secret inside the `kasa` process and never hand it out.
@@ -163,7 +163,9 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa backup-password status\|set\|rm` | Manage the stored backup password | set/rm: human |
 | `kasa import <file.age> [--overwrite]` | Restore a backup on this machine | human + TTY only |
 | `kasa acl migrate [--dry-run] [--target <dir>]` | Move items written before 2.5.0 to kasa's own ACL (takes an encrypted backup first, restore-checked) | human only |
-| `kasa acl devral <backup.age>` | Upgrade handover: rewrite every item from the old kasa's encrypted export so this build can read it (`make install DEVIR_YEDEK=` runs it) | human only |
+| `kasa acl tasi <backup.age>` | 2.5.x upgrade: write every item of the old vault (`~/Library/Keychains/`) into a new vault at the new place from the old kasa's encrypted export; old file kept as `.eski` (`make install DEVIR_YEDEK=` runs it) | human only |
+| `kasa acl devral <backup.age>` | Rewrite every item of the vault in place from an encrypted export so this build can read it (fallback when `acl yokla` says unreadable) | human only |
+| `kasa acl yokla` | Can this build read the vault's items? One line, no value; exit 0 ok / not testable, 1 unreadable, 2 vault at the old place (`make install` gate) | anyone |
 | `kasa version` | Print the version | anyone |
 
 Keys have the form `<namespace>/<name>`, for example `github/token` or `mail/pass`. The old Turkish command names (`hedef`, `yedek`, `yedek-parola`, `sabah`, `--pencere`) are still accepted as hidden aliases.
@@ -281,15 +283,22 @@ Keep at least two targets, and keep one of them off the machine. If a backup liv
 
 Items are written with an access list whose only trusted application is kasa itself. The entry stores kasa's designated requirement, `identifier "kasa" and certificate leaf = H"<sha1>"`: `/usr/bin/security`, an ad-hoc copy or any other process of yours gets `errSecAuthFailed` (interaction is disabled, so no dialog opens either).
 
-**A rebuild does not read the vault by itself.** The vault lives in `~/Library/Keychains/`, where macOS also gives every item a partition list. kasa has no Team ID, so that list names the cdhash of the kasa that wrote the item: a build from changed source, even signed with the same certificate, gets `errSecAuthFailed` (a byte-identical rebuild of the same source still reads). The public API cannot widen a partition list, so an upgrade hands the items over (2.6.0): the installed kasa writes its encrypted backup, the new build deletes and rewrites every item from it, the backup-password item last. `make install` refuses to replace a different installed kasa without it and leaves the old one in place:
+**A rebuild reads the vault without a handover (2.6.0).** The vault lives in `~/Library/Application Support/kasa/`. macOS gives a keychain under `~/Library/Keychains/` a partition list that names the cdhash of the kasa that wrote each item; kasa has no Team ID, so a build from changed source got `errSecAuthFailed` there even with the same certificate (2.5.x lived there and could not be rebuilt). Elsewhere the items carry no partition list, and the certificate-bound access list is enough: any build signed with the same certificate and designated requirement reads, an ad-hoc copy and `/usr/bin/security` still get -25293. This is observed macOS behaviour, not documented; `TestUretimYenidenDerleme` pins it, and `make install` re-checks it every time with `kasa acl yokla` (tries a real item, prints no value). The only fully documented permanent fix is a Team ID signature (a paid Apple Developer account).
+
+### Upgrading from 2.5.x (vault at `~/Library/Keychains/`)
+
+A keychain file moved by hand keeps its items' partition lists (measured), so the items are written again into a new vault. In your own terminal, in this order, once:
 
 ```bash
 ~/.local/bin/kasa unlock
-~/.local/bin/kasa export ~/kasa-devir.age      # the OLD kasa writes its encrypted backup
-make install DEVIR_YEDEK=~/kasa-devir.age     # asks the backup password, moves every item, then installs
+~/.local/bin/kasa export ~/kasa-devir.age     # the OLD kasa writes its encrypted backup
+make install DEVIR_YEDEK=~/kasa-devir.age     # asks the backup password, then a NEW master password (twice),
+                                              # writes every item into the new vault, renames the old file
+                                              # to kasa.keychain-db.eski, installs
+kasa version && kasa export                   # 2.6.0; every item and the backup password read
 ```
 
-If it stops halfway nothing is lost: the encrypted file stays, and running `kasa acl devral <file>` again skips the items already moved. With no vault or no items to keep: `make install DEVIR_ATLA=1`.
+Delete `~/kasa-devir.age` and the `.eski` file once `kasa export` works. If it stops halfway nothing is lost: the old vault is untouched until every item is in the new one; run `./kasa acl tasi ~/kasa-devir.age` again, it reuses the new vault and skips equal items. Until the move, this kasa answers every command with the old place and this instruction instead of creating an empty vault. Later rebuilds (`make install`) need none of this; if the probe ever finds the items unreadable (e.g. a macOS change), `make install` asks for `DEVIR_YEDEK=` again and `kasa acl devral <file>` rewrites them in place. No vault or no items to keep: `make install DEVIR_ATLA=1`.
 
 ### Migrating from before 2.5.0
 
@@ -311,13 +320,13 @@ The old items are read the old way (`security find-generic-password -g`, the onl
 
 ### Lost certificate
 
-1. **You still have the `.p12`.** Run `make cert-hazir && make install` (it imports the `.p12`, asks for its passphrase and writes the SHA-1 to `local.mk`; or import it yourself with `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it). The identity is back; a byte-identical build of the same source reads the items again, any other build needs the handover above. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
+1. **You still have the `.p12`.** Run `make cert-hazir && make install` (it imports the `.p12`, asks for its passphrase and writes the SHA-1 to `local.mk`; or import it yourself with `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it). The identity is back; the items read again. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
 2. **The certificate is gone for good.** Make a new one and re-create the vault from the encrypted backup: items are written under the new certificate, the old ones are removed first.
 
 ```bash
 ./contrib/make-cert.sh --force --p12 ~/kasa-signing-cert-2.p12   # a new certificate
 make install
-mv ~/Library/Keychains/kasa.keychain-db ~/kasa-old-vault.keychain-db   # the old items, unreadable
+mv ~/Library/Application\ Support/kasa/kasa.keychain-db ~/kasa-old-vault.keychain-db   # the old items, unreadable
 kasa init && kasa unlock
 kasa import <your backup>.age       # items are written with the new ACL
 ```

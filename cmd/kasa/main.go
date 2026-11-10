@@ -298,6 +298,10 @@ func acildiktanSonra() {
 func cmdStatus() error {
 	fmt.Println("vault     : " + keychainPath())
 	if !keychainExists() {
+		if e := eskiKasaYolu(); e != "" {
+			fmt.Println("state     : the vault is still at its old place: " + e + " (kasa acl tasi <backup.age>, README: Upgrading)")
+			return nil
+		}
 		fmt.Println("state     : not set up (kasa init)")
 		return nil
 	}
