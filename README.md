@@ -32,7 +32,7 @@ Requires macOS and Go (cgo enabled, which is the default).
 ```bash
 git clone https://github.com/eirikaleid/kasa.git
 cd kasa
-make cert                    # once: signing certificate + encrypted .p12 backup (read the box above)
+make cert-hazir              # signing certificate: ready -> nothing; else restores ~/kasa-signing-cert.p12; else creates a new one (read the box above)
 make install                 # builds, signs with that certificate, installs to ~/.local/bin/kasa
 
 kasa init                    # once: choose a master password (only you know it)
@@ -40,6 +40,8 @@ kasa add github/token        # value is prompted, hidden, never echoed
 kasa profile edit            # define which secrets go to which commands
 kasa run github -- gh pr list
 ```
+
+**On a new machine** (also from a non-interactive setup script) run `make cert-hazir && make install`. `make cert-hazir` is idempotent: if `local.mk` names a `SIGN_IDENTITY` that is in the keychain it does nothing; otherwise, if the `.p12` backup exists (`CERT_P12=<file>`, default `~/kasa-signing-cert.p12`), it imports it and writes its SHA-1 to `local.mk`: the restored certificate has the SHA-1 it always had, so the vault's existing items are readable. Only when there is no backup does it create a **new** certificate (the `make cert` path), which cannot read items of an existing vault (`kasa import` needed). The `.p12` passphrase is taken from `KASA_CERT_P12_PASSPHRASE` or read hidden from `/dev/tty`; with neither, the script stops with an error. It never goes on a command line. `KEYCHAIN=<file>` targets another keychain.
 
 `make cert` writes `SIGN_IDENTITY` to `local.mk` and refuses to run again while `local.mk` names a certificate. Without a certificate `make build` fails instead of signing ad-hoc (an ad-hoc kasa would lose the vault on its next rebuild). `make build ADHOC=1` does it deliberately, with a warning.
 
@@ -298,7 +300,7 @@ The old items are read the old way (`security find-generic-password -g`, the onl
 
 ### Lost certificate
 
-1. **You still have the `.p12`.** Import it into your login keychain (`security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it), run `make install` again. The identity is back, so the items are readable again. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
+1. **You still have the `.p12`.** Run `make cert-hazir && make install` (it imports the `.p12`, asks for its passphrase and writes the SHA-1 to `local.mk`; or import it yourself with `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign`, or double-click it). The identity is back, so the items are readable again. Restoring does not depend on the certificate: the `.p12` is protected by its own passphrase.
 2. **The certificate is gone for good.** Make a new one and re-create the vault from the encrypted backup: items are written under the new certificate, the old ones are removed first.
 
 ```bash

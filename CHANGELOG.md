@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.1 — 2026-11-10
+
+New-machine setup: the signing certificate no longer has to be made by hand before the first build.
+
+- **`make cert-hazir`** (`contrib/cert-hazir.sh`, idempotent; `KEYCHAIN=`, `CERT_P12=`, `CERT_CN=` as for `make cert`): (1) `local.mk` names a `SIGN_IDENTITY` that is in the keychain: nothing happens, exit 0; (2) otherwise, if the `.p12` backup exists (default `~/kasa-signing-cert.p12`): it is decrypted with openssl into a private temporary directory, its key and certificate are imported (`-T /usr/bin/codesign`) and the SHA-1 goes into `local.mk` (other lines kept). The restored certificate has its old SHA-1, so existing items are readable; (3) otherwise a new certificate via `make-cert.sh`, with a warning that an existing vault needs `kasa import`.
+- The `.p12` passphrase comes from `KASA_CERT_P12_PASSPHRASE` or is read hidden from `/dev/tty`; with neither, the script stops with a clear error (never a silent ad-hoc build). It never appears on a command line (`security import -P` would put it there, so the import goes through PEM files that are deleted on exit).
+- The "no signing certificate" error of `make build` now points at `make cert-hazir`.
+- Tests: all three branches, the idempotent second call, restored SHA-1 equal to the original, wrong passphrase and no-terminal errors, in temporary keychains (no windows, never the login keychain or the real vault).
+- Docs: README (EN/TR) quick start and lost-certificate section.
+
 ## 2.5.0 — 2026-11-10
 
 Keychain items now trust only kasa itself, not `/usr/bin/security`.

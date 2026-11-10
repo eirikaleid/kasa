@@ -3,8 +3,9 @@
 #   make install                         # -> ~/.local/bin/kasa
 #   make install BINDIR=~/bin
 #   make install TRUSTED_DIRS="~/bin:~/dotfiles/bin" DEV_ROOT="~/Developer"
+#   make cert-hazir                      # new machine: restore the .p12 or create the certificate, idempotent
 #   make cert                            # once: the code-signing certificate (see README)
-#   make cert KEYCHAIN=<file>            # ... into another keychain (tests use a temporary one)
+#   make cert KEYCHAIN=<file>            # ... into another keychain (tests use a temporary one; cert-hazir too)
 #   make build ADHOC=1                   # deliberately ad-hoc: items break on every rebuild
 #
 # TRUSTED_DIRS / DEV_ROOT are baked into the binary on purpose: a config file
@@ -31,12 +32,12 @@ SIGN_ID      ?= kasa
 ADHOC        ?=
 LDFLAGS      := -s -w -X 'main.trustedDirsFlag=$(TRUSTED_DIRS)' -X 'main.devRootFlag=$(DEV_ROOT)'
 
-.PHONY: build install test vet clean cert check-sign
+.PHONY: build install test vet clean cert cert-hazir check-sign
 
 check-sign:
 	@if [ -z "$(SIGN_IDENTITY)" ] && [ "$(ADHOC)" != "1" ]; then \
 		echo "error: no signing certificate (SIGN_IDENTITY is empty)." >&2; \
-		echo "  run: make cert        (once; then make install)" >&2; \
+		echo "  run: make cert-hazir  (restores the .p12 backup or creates the certificate; then make install)" >&2; \
 		echo "  ad-hoc on purpose (items break on every rebuild): make build ADHOC=1" >&2; \
 		exit 1; \
 	fi
@@ -53,6 +54,12 @@ build: check-sign
 
 cert:
 	./contrib/make-cert.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")
+
+# Non-interactive-safe and idempotent (see contrib/cert-hazir.sh): ready ->
+# nothing; else the .p12 backup is restored (same SHA-1, old items readable);
+# else a NEW certificate. The .p12 passphrase: KASA_CERT_P12_PASSPHRASE or /dev/tty.
+cert-hazir:
+	./contrib/cert-hazir.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")
 
 install: build
 	mkdir -p "$(BINDIR)"

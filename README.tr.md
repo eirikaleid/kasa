@@ -32,7 +32,7 @@ macOS ve Go gerekir (cgo açık olmalı; varsayılan zaten böyle).
 ```bash
 git clone https://github.com/eirikaleid/kasa.git
 cd kasa
-make cert                    # bir kez: imza sertifikası + şifreli .p12 yedeği (yukarıdaki kutuyu oku)
+make cert-hazir              # imza sertifikası: hazırsa dokunmaz; yoksa ~/kasa-signing-cert.p12'yi geri yükler; o da yoksa yenisini üretir (yukarıdaki kutuyu oku)
 make install                 # derler, o sertifikayla imzalar, ~/.local/bin/kasa'ya kurar
 
 kasa init                    # bir kez: ana parolayı belirle (yalnızca sen bilirsin)
@@ -71,6 +71,8 @@ kasa run github -- gh pr list
 <p align="center">
   <img src="assets/terminal-demo.svg" alt="Terminal gösterimi: sır ekleme, anahtar listeleme, ajanda get reddi, ajanda run başarısı" width="900">
 </p>
+
+**Yeni makinede** (etkileşimsiz bir kurulum betiğinden de) `make cert-hazir && make install` çalıştırın. `make cert-hazir` idempotenttir: `local.mk` anahtarlıkta bulunan bir `SIGN_IDENTITY` adlandırıyorsa hiçbir şey yapmaz; yoksa ve `.p12` yedeği varsa (`CERT_P12=<dosya>`, varsayılan `~/kasa-signing-cert.p12`) onu içe aktarır ve SHA-1'ini `local.mk`'ye yazar: geri yüklenen sertifika hep sahip olduğu SHA-1'e sahiptir, kasadaki mevcut kalemler okunur. Yedek de yoksa **yeni** bir sertifika üretir (`make cert` yolu); bu, mevcut bir kasanın kalemlerini okuyamaz (`kasa import` gerekir). `.p12` parolası `KASA_CERT_P12_PASSPHRASE`'den alınır ya da `/dev/tty`'den gizli okunur; ikisi de yoksa betik hatayla durur. Parola hiçbir zaman komut satırına girmez. `KEYCHAIN=<dosya>` başka bir anahtarlığı hedefler.
 
 `make cert`, `SIGN_IDENTITY` değerini `local.mk`'ye yazar; `local.mk` zaten bir sertifikayı adlandırıyorsa yeniden çalışmayı reddeder. Sertifika yoksa `make build` sessizce ad-hoc imzalamak yerine hata verir (ad-hoc bir kasa bir sonraki derlemede kasayı kaybeder). `make build ADHOC=1` bunu bilerek, uyarıyla yapar.
 
@@ -298,7 +300,7 @@ Eski kalemler eski yolla okunur (`security find-generic-password -g`; eski ACL'n
 
 ### Sertifika kaybı
 
-1. **`.p12` elinizde.** Giriş anahtarlığınıza alın (`security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın), `make install`'u yeniden çalıştırın. Kimlik geri geldi; kalemler yeniden okunur. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
+1. **`.p12` elinizde.** `make cert-hazir && make install` çalıştırın (`.p12`'yi içe aktarır, parolasını sorar ve SHA-1'i `local.mk`'ye yazar; ya da kendiniz alın: `security import kasa-signing-cert.p12 -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign` ya da çift tıklayın). Kimlik geri geldi; kalemler yeniden okunur. Geri yükleme sertifikaya bağlı değildir: `.p12`'yi kendi parolası korur.
 2. **Sertifika tamamen kayıp.** Yenisini üretin ve kasayı şifreli yedekten yeniden kurun: kalemler yeni sertifikayla yazılır, eskiler önce kaldırılır.
 
 ```bash
