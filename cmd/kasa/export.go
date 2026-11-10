@@ -119,7 +119,7 @@ func cmdExport(args []string) error {
 	// the contents. The gate is now the password itself: if it is not stored in
 	// the keychain, the agent still cannot get through (see yedekParolasiCoz).
 	if !keychainExists() {
-		return fmt.Errorf("no vault, run first: kasa init")
+		return vaultYok("no vault, run first: kasa init")
 	}
 
 	c, err := loadConfig()
@@ -151,6 +151,10 @@ func cmdExport(args []string) error {
 		v, err := kcGet(k)
 		if err != nil {
 			return fmt.Errorf("could not read %s: %w", k, err)
+		}
+		if !utf8.ValidString(v) {
+			// json would store U+FFFD in its place: a backup that restores a different value.
+			return fmt.Errorf("%s holds a value that is not valid UTF-8; a JSON backup cannot keep it exactly, export aborted", k)
 		}
 		b.Secrets[k] = v
 	}
@@ -377,7 +381,7 @@ func cmdImport(args []string) error {
 	}
 	// Order matters: the vault is created first, then unlocked, then content is written.
 	if !keychainExists() {
-		return fmt.Errorf("no vault. in order: kasa init -> kasa unlock -> kasa import")
+		return vaultYok("no vault. in order: kasa init -> kasa unlock -> kasa import")
 	}
 	if isLocked() {
 		return fmt.Errorf("the vault is locked. first: kasa unlock")

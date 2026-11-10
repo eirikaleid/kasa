@@ -16,7 +16,9 @@ import (
 // login keychain, never the real vault), with interaction disabled: no test
 // here may open a dialog. Items are written and read by copies of the test
 // binary signed with a test certificate:
-//   - a rebuild signed with the same certificate reads without a prompt
+//   - a rebuild signed with the same certificate reads without a prompt, in a
+//     vault OUTSIDE */Library/Keychains only (TMPDIR here); the real vault has
+//     partition lists and needs a handover (uretim_e2e_test.go, acl devral)
 //   - an ad-hoc copy gets errSecAuthFailed
 //   - certificate lost, .p12 restored  -> items readable again
 //   - certificate lost for good        -> new certificate, items re-created
@@ -205,20 +207,22 @@ func TestImzaliSertifikaYolu(t *testing.T) {
 		t.Fatalf("make-cert.sh replaced an existing identity without --force:\n%s", out)
 	}
 
-	// Makefile: no silent ad-hoc.
+	// Makefile: no silent ad-hoc. Built in a copy without the checkout's
+	// local.mk, whose SIGN_IDENTITY would make the certificate-less build pass.
+	src := e2eKaynak(t, "")
 	d := t.TempDir()
-	if out, err := komutKos(t, kok, nil, "make", "build", "OUT="+filepath.Join(d, "x")); err == nil || !strings.Contains(out, "make cert") {
+	if out, err := komutKos(t, src, nil, "make", "build", "OUT="+filepath.Join(d, "x")); err == nil || !strings.Contains(out, "make cert") {
 		t.Fatalf("make build without a certificate must fail and point at `make cert`: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(d, "x")); err == nil {
 		t.Fatal("make build produced a binary without a certificate")
 	}
 	adhoc := filepath.Join(d, "adhoc")
-	if out, err := komutKos(t, kok, nil, "make", "build", "ADHOC=1", "OUT="+adhoc); err != nil || !strings.Contains(out, "WARNING: ad-hoc") {
+	if out, err := komutKos(t, src, nil, "make", "build", "ADHOC=1", "OUT="+adhoc); err != nil || !strings.Contains(out, "WARNING: ad-hoc") {
 		t.Fatalf("make build ADHOC=1: %v\n%s", err, out)
 	}
 	imzali := filepath.Join(d, "signed")
-	if out, err := komutKos(t, kok, nil, "make", "build", "OUT="+imzali, "SIGN_IDENTITY="+sha1, "SIGN_KEYCHAIN="+kc1); err != nil {
+	if out, err := komutKos(t, src, nil, "make", "build", "OUT="+imzali, "SIGN_IDENTITY="+sha1, "SIGN_KEYCHAIN="+kc1); err != nil {
 		t.Fatalf("make build with the certificate: %v\n%s", err, out)
 	}
 	if out, _ := komutKos(t, "", nil, "/usr/bin/codesign", "-d", "-r-", imzali); !strings.Contains(out, "identifier kasa and") || !strings.Contains(strings.ToLower(out), `certificate leaf = h"`+strings.ToLower(sha1)+`"`) {

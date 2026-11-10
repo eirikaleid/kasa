@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.6.0 — 2026-11-10
+
+Correction: a rebuild signed with the same certificate did NOT read the vault (2.5.0 said it did). The vault moves so that it does.
+
+- **Cause, measured:** the vault lived in `~/Library/Keychains/`; macOS gives keychains there partition lists, and an item written by a Team-ID-less kasa names the writer's cdhash. A build from changed source got `errSecAuthFailed` even with the same certificate and designated requirement; it could still delete the item. Keychains elsewhere (the 2.5.x tests used TMPDIR) have no partition list, which is why `TestImzaliSertifikaYolu` passed. Measured in temporary keychains with real `make build` binaries of two source versions: vault in TMPDIR or `Library/Application Support/kasa/` → the rebuild reads; vault under `Library/Keychains/` → -25293; a keychain file written under `Library/Keychains/` and then moved to Application Support → still -25293 (the list is inside the item); in Application Support an ad-hoc copy and `/usr/bin/security` still get -25293 and no window opens.
+- **New default vault path:** `~/Library/Application Support/kasa/kasa.keychain-db` (directory 0700). A rebuild reads without any handover. This is observed, undocumented macOS behaviour; it trades one macOS barrier (the partition list) for rebuildability, pinned by `TestUretimYenidenDerleme` and re-checked on every `make install`. The only fully documented permanent fix is a Team ID signature.
+- **Old vault is never moved silently.** If the old file exists and the new one does not, every command says so and points to `kasa acl tasi`; `kasa init` does not create an empty vault next to it.
+- **`kasa acl tasi <backup.age>`** (human only): from the old kasa's encrypted export, writes every item of the old vault (with its attributes; the backup-password item last) into a new vault at the new place, reading each back; only then renames the old file to `.eski` (never deleted). Checks everything against the backup before creating anything; a rerun reuses the new vault and skips equal items.
+- **`kasa acl yokla`:** can this build read a real item of the vault? One line, no value; exit 0 ok or not testable (no vault / locked / no item), 1 unreadable, 2 vault still at the old place, 3 other error.
+- **`make install` gate** is that probe instead of a cdhash comparison: ok → install; unreadable → `DEVIR_YEDEK=<file>` (runs `kasa acl devral`, rewrite in place); old place → `DEVIR_YEDEK=<file>` (runs `kasa acl tasi`). Without it the sequence is printed and the old binary stays. `DEVIR_ATLA=1` skips.
+- **`kasa acl devral <backup.age>`** (human only): the in-place variant, kept as the fallback if a future macOS makes the probe fail: delete-and-rewrite with read-back (`acl migrate` routine), backup-password item last.
+- **Rejected:** widening the partition list (only the private password variant can; no partition value means "this certificate" for code without a Team ID) and a pipe protocol between two kasa processes for this step (the sending 2.5.x cannot run new code).
+- **Audit fixes (same release):**
+  - A half-finished `acl tasi` is detected: new vault exists and the old file is still there = move unfinished. `acl yokla` exits 2 (the `make install` gate then runs `acl tasi`, which reuses the new vault), `status` and every vault command say UNFINISHED; the old file is renamed to `.eski` last.
+  - `acl devral`: an item deleted but not rewritten (a kill in that window) is written back from the backup on the rerun; items missing from the backup, or with bad values, stop it before anything is touched; SIGINT/SIGTERM/SIGHUP are held between delete and rewrite.
+  - `acl tasi` refuses a backup older than the old vault file, checks that every old item is in the new vault by listing it, and names the items it skips because they are not kasa secrets. Values that are not valid UTF-8 (or hold U+FFFD) are an explicit error by item name, never a silent replacement; `export` refuses them too.
+  - `make install` stages `kasa.new` before the gate and only `mv`s afterwards; a refused or failed install removes it and leaves the old binary.
+  - `acl tasi` output reminds you to delete the encrypted backup (`rm -P`). `kcList` (so `export`) no longer drops items whose account name is non-ASCII (dump-keychain prints those as hex).
+- Tests: `TestUretimTasiYarim` (move cut off after 2 of 4 items, rerun completes), in-process `tasi_test.go` (hex account, signal guard, devral write-back and up-front checks, stale backup), `TestUretimYenidenDerleme` (tmp / library-keychains / appsupport + negatives), `TestUretimKasaTasima` (a moved file stays unreadable), `TestUretimYerDegisimi` (2.5.x→2.6.0 move through `make install DEVIR_YEDEK=`, then a third source version installs and reads with no handover), `TestUretimYukseltmeDevri` (fallback path). `TestImzaliSertifikaYolu` builds in a copy without the checkout's `local.mk`.
+- Docs: README (EN/TR), SECURITY.md, AGENTS.md (rule 4), Makefile comment.
+
 ## 2.5.1 — 2026-11-10
 
 New-machine setup: the signing certificate no longer has to be made by hand before the first build.

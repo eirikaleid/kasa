@@ -28,7 +28,60 @@ func keychainPath() string {
 	if h == "" {
 		return ""
 	}
+	return filepath.Join(h, "Library", "Application Support", "kasa", "kasa.keychain-db")
+}
+
+// eskiKeychainYolu: where the vault lived up to 2.5.x. macOS gives keychains
+// under ~/Library/Keychains partition lists that bind an item to the cdhash of
+// the kasa that wrote it, so a rebuild cannot read them; elsewhere (measured:
+// Application Support) it does. A keychain FILE moved from there keeps its
+// items' partition lists, so moving is a re-write (acl tasi), not a mv.
+func eskiKeychainYolu() string {
+	if testKeychainYolu != "" {
+		return filepath.Join(kasaEvi(), "Library", "Keychains", "kasa.keychain-db")
+	}
+	h := homeDir()
+	if h == "" {
+		return ""
+	}
 	return filepath.Join(h, "Library", "Keychains", "kasa.keychain-db")
+}
+
+// eskiKasaYolu: the old vault file if there is one (and it is not the vault in use).
+func eskiKasaYolu() string {
+	e := eskiKeychainYolu()
+	if e == "" || e == keychainPath() {
+		return ""
+	}
+	if _, err := os.Stat(e); err != nil {
+		return ""
+	}
+	return e
+}
+
+// tasiYarim: the new vault exists and the old file is still there, i.e. `acl
+// tasi` started and did not finish (it renames the old file only after every
+// item is in the new vault). The new vault then holds only part of the items.
+func tasiYarim() string {
+	if keychainExists() {
+		return eskiKasaYolu()
+	}
+	return ""
+}
+
+func tasiYarimHatasi(eski string) error {
+	return fmt.Errorf("the move from the old place is UNFINISHED: the new vault (%s) holds only part of the items, the old vault is still at %s.\n"+
+		"  finish it (human only): export again with the INSTALLED kasa (`kasa export <file>`), then `make install DEVIR_YEDEK=<file>` or `kasa acl tasi <file>` (it continues where it stopped)",
+		keychainPath(), eski)
+}
+
+// vaultYok: the "no vault" error; names the old place when the vault is still there.
+func vaultYok(yeniyse string) error {
+	if e := eskiKasaYolu(); e != "" {
+		return fmt.Errorf("the vault is still at its old place (%s); this kasa keeps it at %s.\n"+
+			"  move it (human only): kasa acl tasi <backup.age>, the file written by the OLD kasa's `kasa export <file>` (README, Upgrading)", e, keychainPath())
+	}
+	return fmt.Errorf("%s", yeniyse)
 }
 
 func keychainName() string { return "kasa.keychain" }
@@ -47,8 +100,11 @@ func keychainExists() bool {
 // UP looked like "that key does not exist". For add the result was worse: the
 // write failed, yet the user believed the secret had been saved.
 func requireKasa() error {
+	if e := tasiYarim(); e != "" {
+		return tasiYarimHatasi(e)
+	}
 	if !keychainExists() {
-		return fmt.Errorf("vault is not set up (%s does not exist). first run: kasa init", keychainPath())
+		return vaultYok(fmt.Sprintf("vault is not set up (%s does not exist). first run: kasa init", keychainPath()))
 	}
 	return nil
 }
@@ -113,6 +169,9 @@ func secBaytStderr(args ...string) ([]byte, []byte, error) {
 func kcCreate(password string) error {
 	if keychainExists() {
 		return fmt.Errorf("kasa is already set up: %s", keychainPath())
+	}
+	if err := os.MkdirAll(filepath.Dir(keychainPath()), 0o700); err != nil {
+		return err
 	}
 	if err := kcOlusturYol(keychainPath(), []byte(password)); err != nil {
 		return err
@@ -246,35 +305,19 @@ func kcList() ([]string, error) {
 	if err := kilitKapisi(); err != nil {
 		return nil, err
 	}
-	out, err := sec("dump-keychain", keychainPath())
+	// Through kcOgelerYol: it decodes the `0x<hex>  "..."` form dump-keychain
+	// uses for an account with non-ASCII characters; the old line parser here
+	// skipped such items, so export and the key list dropped them.
+	ogeler, err := kcOgelerYol(keychainPath())
 	if err != nil {
 		return nil, err
 	}
 	var keys []string
-	lines := strings.Split(out, "\n")
-	svcOK := false
-	acct := ""
-	flush := func() {
-		if svcOK && acct != "" {
-			keys = append(keys, acct)
-		}
-		svcOK, acct = false, ""
-	}
-	for _, l := range lines {
-		if strings.HasPrefix(l, "keychain:") {
-			flush()
-		}
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "\"svce\"") && strings.Contains(t, "\""+service+"\"") {
-			svcOK = true
-		}
-		if strings.HasPrefix(t, "\"acct\"") {
-			if i := strings.Index(t, "=\""); i >= 0 {
-				acct = strings.Trim(t[i+1:], "\"")
-			}
+	for _, o := range ogeler {
+		if o.svc == service && o.acct != "" {
+			keys = append(keys, o.acct)
 		}
 	}
-	flush()
 	sort.Strings(keys)
 	return uniq(keys), nil
 }

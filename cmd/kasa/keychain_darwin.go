@@ -22,8 +22,10 @@ package main
 // is the running kasa binary (SecTrustedApplicationCreateFromPath(NULL)). The
 // entry stores kasa's designated requirement; `make build` signs kasa with the
 // user's own code-signing certificate, so the requirement is
-// `identifier "kasa" and certificate leaf = H"..."`, not a cdhash: a rebuilt
-// kasa signed with the same certificate reads without a prompt, while
+// `identifier "kasa" and certificate leaf = H"..."`. Under ~/Library/Keychains the
+// item also gets a partition list naming the writer's cdhash (no Team ID), so a
+// build from changed source cannot read it; the vault therefore lives in
+// Application Support (keychain.go keychainPath), where it gets none. Meanwhile
 // /usr/bin/security, an ad-hoc copy or any other process of the same user gets
 // errSecAuthFailed (interaction is disabled, no dialog). Reading is done here
 // too (kasaOkuC), not through the security CLI.
@@ -287,6 +289,11 @@ const (
 
 var errAnahtarYok = errors.New("no such key")
 
+// errYetkisiz: -25293; for a rebuilt kasa reading an item written by another
+// build in a keychain under ~/Library/Keychains this is the partition list
+// (acl yokla tells it apart from a wrong password by trying a real item).
+var errYetkisiz = errors.New("wrong password or access denied")
+
 // osHata: maps an OSStatus to kasa's earlier (security CLI era) error messages.
 func osHata(r C.OSStatus) error {
 	switch int(r) {
@@ -297,7 +304,7 @@ func osHata(r C.OSStatus) error {
 	case osInteractionBlocked:
 		return fmt.Errorf("vault is locked. unlock: kasa unlock")
 	case osAuthFailed:
-		return fmt.Errorf("wrong password or access denied (code %d)", int(r))
+		return fmt.Errorf("%w (code %d)", errYetkisiz, int(r))
 	case osNoSuchKeychain:
 		return fmt.Errorf("vault file does not exist (code %d). first run: kasa init", int(r))
 	case osDuplicateKeychain:

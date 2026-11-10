@@ -12,8 +12,10 @@
 # would be writable by the very agents kasa is guarding against.
 #
 # kasa is signed with a self-signed certificate (SIGN_IDENTITY, a SHA-1 written to
-# local.mk by `make cert`). The vault's items trust that certificate, not one
-# build, so a rebuild keeps reading them. Without a certificate the build FAILS
+# local.mk by `make cert`). The vault lives under ~/Library/Application Support/kasa
+# (a keychain under ~/Library/Keychains would bind its items to the writer's
+# cdhash, macOS partition list), so a rebuild reads it; `make install` checks that
+# (`kasa acl yokla`) and asks for a handover only when it cannot (DEVIR_YEDEK=). Without a certificate the build FAILS
 # instead of silently signing ad-hoc: an ad-hoc kasa would lock itself out of
 # the vault on its next rebuild.
 #
@@ -56,14 +58,36 @@ cert:
 	./contrib/make-cert.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")
 
 # Non-interactive-safe and idempotent (see contrib/cert-hazir.sh): ready ->
-# nothing; else the .p12 backup is restored (same SHA-1, old items readable);
+# nothing; else the .p12 backup is restored (same SHA-1; old items readable by a byte-identical build only);
 # else a NEW certificate. The .p12 passphrase: KASA_CERT_P12_PASSPHRASE or /dev/tty.
 cert-hazir:
 	./contrib/cert-hazir.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")
 
+# Gate: can THIS build read the vault? (`kasa acl yokla` tries a real item, prints
+# no value.) Readable, or not testable (no vault / locked): install. Unreadable
+# (another build wrote the items: macOS partition list) or the vault still at its
+# old place (up to 2.5.x): the encrypted backup of the installed kasa
+# (`kasa export <file>`) is needed, DEVIR_YEDEK=<file>. The new kasa moves/rewrites
+# the items first, then the binary is replaced. The new binary is copied next to
+# the old one BEFORE the gate (a full disk or a read-only BINDIR must not surface
+# after the items were moved); on any failure kasa.new is removed, the old kasa stays.
 install: build
 	mkdir -p "$(BINDIR)"
-	cp kasa "$(BINDIR)/kasa.new" && mv -f "$(BINDIR)/kasa.new" "$(BINDIR)/kasa"
+	cp kasa "$(BINDIR)/kasa.new"
+	@( ./kasa acl yokla; rc=$$?; \
+	if [ $$rc -ne 0 ] && [ "$(DEVIR_ATLA)" != "1" ]; then \
+		if [ $$rc -ne 1 ] && [ $$rc -ne 2 ]; then echo "error: cannot tell whether this build reads the vault (see above)" >&2; exit 1; fi; \
+		if [ -z "$(DEVIR_YEDEK)" ]; then \
+			echo "error: the vault needs a handover first. In a terminal:" >&2; \
+			echo "  1) $(BINDIR)/kasa unlock" >&2; \
+			echo "  2) $(BINDIR)/kasa export <file.age>      (the INSTALLED kasa writes its encrypted backup)" >&2; \
+			echo "  3) make install DEVIR_YEDEK=<file.age>   (this build moves / rewrites every item)" >&2; \
+			echo "  no vault / no items to keep: make install DEVIR_ATLA=1" >&2; \
+			exit 1; \
+		fi; \
+		if [ $$rc -eq 2 ]; then ./kasa acl tasi "$(DEVIR_YEDEK)" || exit 1; else ./kasa acl devral "$(DEVIR_YEDEK)" || exit 1; fi; \
+	fi ) || { rm -f "$(BINDIR)/kasa.new"; exit 1; }
+	mv -f "$(BINDIR)/kasa.new" "$(BINDIR)/kasa"
 	@echo "installed: $(BINDIR)/kasa"
 
 test:
