@@ -213,26 +213,37 @@ func validKey(k string) error {
 
 // ---- commands ----
 
+func yeniMasterParola() (string, error) {
+	fmt.Println("Choose a master password for the vault. Only you know it;")
+	fmt.Println("while the vault is locked, no agent can read the secrets.")
+	p1, err := promptSecret("master password: ")
+	if err != nil {
+		return "", err
+	}
+	if len(p1) < 8 {
+		return "", fmt.Errorf("password must be at least 8 characters")
+	}
+	p2, err := promptSecret("repeat     : ")
+	if err != nil {
+		return "", err
+	}
+	if p1 != p2 {
+		return "", fmt.Errorf("passwords do not match")
+	}
+	return p1, nil
+}
+
 func cmdInit() error {
 	if keychainExists() {
 		fmt.Println("kasa is already set up: " + keychainPath())
 		return nil
 	}
-	fmt.Println("Choose a master password for the vault. Only you know it;")
-	fmt.Println("while the vault is locked, no agent can read the secrets.")
-	p1, err := promptSecret("master password: ")
+	if e := eskiKasaYolu(); e != "" {
+		return vaultYok("")
+	}
+	p1, err := yeniMasterParola()
 	if err != nil {
 		return err
-	}
-	if len(p1) < 8 {
-		return fmt.Errorf("password must be at least 8 characters")
-	}
-	p2, err := promptSecret("repeat     : ")
-	if err != nil {
-		return err
-	}
-	if p1 != p2 {
-		return fmt.Errorf("passwords do not match")
 	}
 	if err := kcCreate(p1); err != nil {
 		return err
@@ -245,7 +256,7 @@ func cmdInit() error {
 
 func cmdUnlock(args []string) error {
 	if !keychainExists() {
-		return fmt.Errorf("no vault yet, first run: kasa init")
+		return vaultYok("no vault yet, first run: kasa init")
 	}
 	if isAgent() {
 		audit("DENIED", "unlock", "", "agent environment")

@@ -288,6 +288,11 @@ const (
 
 var errAnahtarYok = errors.New("no such key")
 
+// errYetkisiz: -25293; for a rebuilt kasa reading an item written by another
+// build in a keychain under ~/Library/Keychains this is the partition list
+// (acl yokla tells it apart from a wrong password by trying a real item).
+var errYetkisiz = errors.New("wrong password or access denied")
+
 // osHata: maps an OSStatus to kasa's earlier (security CLI era) error messages.
 func osHata(r C.OSStatus) error {
 	switch int(r) {
@@ -298,7 +303,7 @@ func osHata(r C.OSStatus) error {
 	case osInteractionBlocked:
 		return fmt.Errorf("vault is locked. unlock: kasa unlock")
 	case osAuthFailed:
-		return fmt.Errorf("wrong password or access denied (code %d)", int(r))
+		return fmt.Errorf("%w (code %d)", errYetkisiz, int(r))
 	case osNoSuchKeychain:
 		return fmt.Errorf("vault file does not exist (code %d). first run: kasa init", int(r))
 	case osDuplicateKeychain:

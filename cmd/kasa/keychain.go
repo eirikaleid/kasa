@@ -28,7 +28,44 @@ func keychainPath() string {
 	if h == "" {
 		return ""
 	}
+	return filepath.Join(h, "Library", "Application Support", "kasa", "kasa.keychain-db")
+}
+
+// eskiKeychainYolu: where the vault lived up to 2.5.x. macOS gives keychains
+// under ~/Library/Keychains partition lists that bind an item to the cdhash of
+// the kasa that wrote it, so a rebuild cannot read them; elsewhere (measured:
+// Application Support) it does. A keychain FILE moved from there keeps its
+// items' partition lists, so moving is a re-write (acl tasi), not a mv.
+func eskiKeychainYolu() string {
+	if testKeychainYolu != "" {
+		return filepath.Join(kasaEvi(), "Library", "Keychains", "kasa.keychain-db")
+	}
+	h := homeDir()
+	if h == "" {
+		return ""
+	}
 	return filepath.Join(h, "Library", "Keychains", "kasa.keychain-db")
+}
+
+// eskiKasaYolu: the old vault file if there is one (and it is not the vault in use).
+func eskiKasaYolu() string {
+	e := eskiKeychainYolu()
+	if e == "" || e == keychainPath() {
+		return ""
+	}
+	if _, err := os.Stat(e); err != nil {
+		return ""
+	}
+	return e
+}
+
+// vaultYok: the "no vault" error; names the old place when the vault is still there.
+func vaultYok(yeniyse string) error {
+	if e := eskiKasaYolu(); e != "" {
+		return fmt.Errorf("the vault is still at its old place (%s); this kasa keeps it at %s.\n"+
+			"  move it (human only): kasa acl tasi <backup.age>, the file written by the OLD kasa's `kasa export <file>` (README, Upgrading)", e, keychainPath())
+	}
+	return fmt.Errorf("%s", yeniyse)
 }
 
 func keychainName() string { return "kasa.keychain" }
@@ -48,7 +85,7 @@ func keychainExists() bool {
 // write failed, yet the user believed the secret had been saved.
 func requireKasa() error {
 	if !keychainExists() {
-		return fmt.Errorf("vault is not set up (%s does not exist). first run: kasa init", keychainPath())
+		return vaultYok(fmt.Sprintf("vault is not set up (%s does not exist). first run: kasa init", keychainPath()))
 	}
 	return nil
 }
@@ -113,6 +150,9 @@ func secBaytStderr(args ...string) ([]byte, []byte, error) {
 func kcCreate(password string) error {
 	if keychainExists() {
 		return fmt.Errorf("kasa is already set up: %s", keychainPath())
+	}
+	if err := os.MkdirAll(filepath.Dir(keychainPath()), 0o700); err != nil {
+		return err
 	}
 	if err := kcOlusturYol(keychainPath(), []byte(password)); err != nil {
 		return err

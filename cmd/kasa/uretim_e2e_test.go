@@ -51,7 +51,7 @@ func e2eKaynak(t *testing.T, surum string) string {
 // vault path and kasa's home pointed at the test directories.
 func e2eMakeBuild(t *testing.T, src, out, sha1, kc, vault, ev string) {
 	t.Helper()
-	ld := "LDFLAGS=-s -w -X main.testKeychainYolu=" + vault + " -X main.testEvDizini=" + ev
+	ld := "LDFLAGS=-s -w -X 'main.testKeychainYolu=" + vault + "' -X 'main.testEvDizini=" + ev + "'"
 	if o, err := komutKos(t, src, nil, "make", "build", "OUT="+out, "SIGN_IDENTITY="+sha1, "SIGN_KEYCHAIN="+kc, ld); err != nil {
 		t.Fatalf("make build: %v\n%s", err, o)
 	}
@@ -104,6 +104,7 @@ func TestUretimYenidenDerleme(t *testing.T) {
 	for _, yer := range []struct{ ad, alt string }{
 		{"tmp", "kasa.keychain-db"},
 		{"library-keychains", "Library/Keychains/kasa.keychain-db"},
+		{"appsupport", "Library/Application Support/kasa/kasa.keychain-db"},
 	} {
 		t.Run(yer.ad, func(t *testing.T) {
 			ev := kanonikTemp(t)
@@ -121,9 +122,12 @@ func TestUretimYenidenDerleme(t *testing.T) {
 				t.Fatalf("old kasa reads its own item: %v\n%s", err, out)
 			}
 			_, err := e2eKasa(t, yeni, "", "run", "p", "--", "/usr/bin/true")
-			if yer.ad == "tmp" {
+			if yer.ad != "library-keychains" {
 				if err != nil {
 					t.Fatalf("outside */Library/Keychains a rebuild reads: %v", err)
+				}
+				if yer.ad == "appsupport" {
+					e2eNegatif(t, eski, vault, ev)
 				}
 				return
 			}
@@ -168,9 +172,7 @@ func TestUretimYukseltmeDevri(t *testing.T) {
 	e2eUretimOrtami(t, vault, ev, "e2e/a", "e2e/b")
 	bindir := filepath.Join(t.TempDir(), "bin")
 	kur := func(src string, ekstra ...string) (string, error) {
-		args := []string{"make", "install", "BINDIR=" + bindir, "SIGN_IDENTITY=" + sha1, "SIGN_KEYCHAIN=" + kc1,
-			"LDFLAGS=-s -w -X main.testKeychainYolu=" + vault + " -X main.testEvDizini=" + ev}
-		return e2eInsan(t, src, strings.Join(ekstra[1:], ""), append(args, ekstra[0])...)
+		return e2eKur(t, src, bindir, sha1, kc1, vault, ev, ekstra...)
 	}
 	if out, err := kur(srcA, "DEVIR_ATLA=", ""); err != nil {
 		t.Fatalf("installing the old kasa: %v\n%s", err, out)
@@ -223,6 +225,15 @@ func TestUretimYukseltmeDevri(t *testing.T) {
 	}
 }
 
+// e2eKur: `make install` of src into bindir, as a human on a terminal.
+// ekstra[0] is one more make argument, the rest is typed in.
+func e2eKur(t *testing.T, src, bindir, sha1, kc1, vault, ev string, ekstra ...string) (string, error) {
+	t.Helper()
+	args := []string{"make", "install", "BINDIR=" + bindir, "SIGN_IDENTITY=" + sha1, "SIGN_KEYCHAIN=" + kc1,
+		"LDFLAGS=-s -w -X 'main.testKeychainYolu=" + vault + "' -X 'main.testEvDizini=" + ev + "'"}
+	return e2eInsan(t, src, strings.Join(ekstra[1:], ""), append(args, ekstra[0])...)
+}
+
 // yavasGirdi: types one line at a time after a pause. Typed ahead, a line is
 // flushed when the prompt switches the terminal to no-echo.
 type yavasGirdi struct{ satirlar []string }
@@ -239,4 +250,136 @@ func (y *yavasGirdi) Read(p []byte) (int, error) {
 	n := copy(p, y.satirlar[0])
 	y.satirlar[0] = y.satirlar[0][n:]
 	return n, nil
+}
+
+// e2eNegatif: nobody but kasa gets the value, and no window opens (interaction
+// is disabled in-process; the security CLI is only asked to DESCRIBE the ACL).
+func e2eNegatif(t *testing.T, kasa, vault, ev string) {
+	t.Helper()
+	if v, err := kcOkuYol(vault, service, "e2e/key"); err == nil {
+		t.Fatalf("the unsigned test process read the item: %q", v)
+	}
+	if out, _ := e2eKasa(t, e2eAdhoc(t, kasa), "", "run", "p", "--", "/usr/bin/true"); !strings.Contains(out, "-25293") {
+		t.Fatalf("an ad-hoc copy must get -25293: %s", out)
+	}
+	dump, err := komutKos(t, "", nil, "/usr/bin/security", "dump-keychain", "-a", vault)
+	if err != nil {
+		t.Fatalf("dump-keychain -a: %v\n%s", err, dump)
+	}
+	if strings.Contains(dump, "/usr/bin/security") {
+		t.Fatalf("/usr/bin/security is in the item's ACL:\n%s", dump)
+	}
+}
+
+// TestUretimKasaTasima (experiment b): the item is written under
+// */Library/Keychains, then the FILE is moved to the new place. A build of
+// changed source still cannot read it: the partition list is inside the item,
+// not bound to the location. That is why `acl tasi` writes the items again
+// instead of moving the file.
+func TestUretimKasaTasima(t *testing.T) {
+	kc1, kcp1 := e2eAnahtarlik(t, "cert1")
+	sha1, _, _ := e2eSertifika(t, kc1, kcp1)
+	srcA, srcB := e2eKaynak(t, ""), e2eKaynak(t, "9.9.9-rebuild")
+	ev := kanonikTemp(t)
+	eskiYol := filepath.Join(ev, "Library", "Keychains", "kasa.keychain-db")
+	yeniYol := filepath.Join(ev, "Library", "Application Support", "kasa", "kasa.keychain-db")
+	e2eUretimOrtami(t, eskiYol, ev, "e2e/key")
+	d := t.TempDir()
+	a, b := filepath.Join(d, "a"), filepath.Join(d, "b")
+	e2eMakeBuild(t, srcA, a, sha1, kc1, eskiYol, ev)
+	e2eMakeBuild(t, srcB, b, sha1, kc1, yeniYol, ev)
+	if out, err := e2eKasa(t, a, "sekret-değer", "add", "e2e/key", "--stdin"); err != nil {
+		t.Fatalf("add: %v\n%s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Dir(yeniYol), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(eskiYol, yeniYol); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kcKeychainSilYol(yeniYol) })
+	// A moved file is a new keychain to securityd: locked until unlocked.
+	if err := kcParolaylaAcYol(yeniYol, []byte("temporary-e2e-password")); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if out, err := e2eKasa(t, b, "", "run", "p", "--", "/usr/bin/true"); err == nil {
+		t.Fatalf("a moved keychain file is readable by a rebuild: the partition list follows the location after all, `acl tasi` can be a mv.\n%s", out)
+	}
+}
+
+// TestUretimYerDegisimi: the 2.5.x -> 2.6.0 step. The old kasa keeps the vault
+// under */Library/Keychains; the new default is Application Support, where a
+// rebuild reads without a handover. The old vault is moved with `make install
+// DEVIR_YEDEK=` (-> acl tasi); afterwards a third source version installs and
+// reads the items with no handover at all.
+func TestUretimYerDegisimi(t *testing.T) {
+	kc1, kcp1 := e2eAnahtarlik(t, "cert1")
+	sha1, _, _ := e2eSertifika(t, kc1, kcp1)
+	srcA, srcB, srcC := e2eKaynak(t, ""), e2eKaynak(t, "9.9.9-rebuild"), e2eKaynak(t, "9.9.10-rebuild")
+	ev := kanonikTemp(t)
+	eskiYol := filepath.Join(ev, "Library", "Keychains", "kasa.keychain-db")
+	yeniYol := filepath.Join(ev, "Library", "Application Support", "kasa", "kasa.keychain-db")
+	e2eUretimOrtami(t, eskiYol, ev, "e2e/a", "e2e/b")
+	t.Cleanup(func() { kcKeychainSilYol(yeniYol) })
+	bindir := filepath.Join(t.TempDir(), "bin")
+	if out, err := e2eKur(t, srcA, bindir, sha1, kc1, eskiYol, ev, "DEVIR_ATLA=1"); err != nil {
+		t.Fatalf("installing the old kasa: %v\n%s", err, out)
+	}
+	kasa := filepath.Join(bindir, "kasa")
+	for _, k := range []string{"e2e/a", "e2e/b"} {
+		if out, err := e2eKasa(t, kasa, "değer-"+k, "add", k, "--stdin"); err != nil {
+			t.Fatalf("old kasa add: %v\n%s", err, out)
+		}
+	}
+	const yp, master = "Backup.Pass-2026", "Master.Pass-2026"
+	if out, err := e2eInsan(t, "", yp+"\n"+yp+"\n", kasa, "backup-password", "set"); err != nil {
+		t.Fatalf("backup-password set: %v\n%s", err, out)
+	}
+	eskiBayt, _ := os.ReadFile(kasa)
+
+	// The new kasa says where the vault is instead of pretending there is none.
+	yeni := filepath.Join(t.TempDir(), "kasa-new")
+	e2eMakeBuild(t, srcB, yeni, sha1, kc1, yeniYol, ev)
+	if out, err := e2eKasa(t, yeni, "", "run", "p", "--", "/usr/bin/true"); err == nil || !strings.Contains(out, "acl tasi") {
+		t.Fatalf("no hint about the old vault: %v\n%s", err, out)
+	}
+	out, err := e2eKur(t, srcB, bindir, sha1, kc1, yeniYol, ev, "DEVIR_ATLA=", "")
+	if err == nil || !strings.Contains(out, "DEVIR_YEDEK") {
+		t.Fatalf("make install must ask for the backup while the vault is at the old place: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(kasa); string(b) != string(eskiBayt) {
+		t.Fatal("the refused install replaced the old kasa")
+	}
+	yedek := filepath.Join(t.TempDir(), "devir.age")
+	if out, err := e2eInsan(t, "", "", kasa, "export", yedek); err != nil {
+		t.Fatalf("old kasa export: %v\n%s", err, out)
+	}
+	if out, err := e2eKur(t, srcB, bindir, sha1, kc1, yeniYol, ev, "DEVIR_YEDEK="+yedek, yp+"\n"+master+"\n"+master+"\n"); err != nil || !strings.Contains(out, "moved: 3 written") {
+		t.Fatalf("make install DEVIR_YEDEK: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(eskiYol); err == nil {
+		t.Fatal("the old vault file is still in place")
+	}
+	if _, err := os.Stat(eskiYol + ".eski"); err != nil {
+		t.Fatalf("the old vault was not kept as .eski: %v", err)
+	}
+	if out, err := e2eKasa(t, kasa, "", "run", "p", "--", "/usr/bin/true"); err != nil {
+		t.Fatalf("the new kasa cannot read the moved items: %v\n%s", err, out)
+	}
+	if out, err := e2eInsan(t, "", "", kasa, "export", filepath.Join(t.TempDir(), "yeni.age")); err != nil {
+		t.Fatalf("the new kasa cannot export (backup password not moved?): %v\n%s", err, out)
+	}
+	// The point: another source version, same certificate, NO handover.
+	if out, err := e2eKur(t, srcC, bindir, sha1, kc1, yeniYol, ev, "DEVIR_ATLA=", ""); err != nil || strings.Contains(out, "DEVIR_YEDEK") {
+		t.Fatalf("a rebuild at the new place must install without a handover: %v\n%s", err, out)
+	}
+	if out, err := e2eKasa(t, kasa, "", "version"); err != nil || !strings.Contains(out, "9.9.10-rebuild") {
+		t.Fatalf("installed version: %v\n%s", err, out)
+	}
+	if out, err := e2eKasa(t, kasa, "", "run", "p", "--", "/usr/bin/true"); err != nil {
+		t.Fatalf("the rebuilt kasa cannot read the items: %v\n%s", err, out)
+	}
+	if out, err := e2eInsan(t, "", "", kasa, "export", filepath.Join(t.TempDir(), "uc.age")); err != nil {
+		t.Fatalf("the rebuilt kasa cannot export: %v\n%s", err, out)
+	}
 }
