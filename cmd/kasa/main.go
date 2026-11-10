@@ -134,7 +134,7 @@ func usage() {
   kasa init                     create the vault (once)
   kasa unlock | lock            unlock / lock
   kasa status [-q | --json]     show state; exit 0 unlocked, 3 locked, 4 no vault
-  kasa doctor [profile] [--json] diagnose; exit 0 ok, 1 warning, 2 failure
+  kasa doctor [profile] [--json] diagnose; exit 0 ok, 1 warning, 2 failure, 75 locked
   kasa unlock --gui             unlock with the macOS password dialog
   kasa morning                  prompt with a dialog if not unlocked today (LaunchAgent, every 10 min)
 
@@ -160,7 +160,7 @@ func usage() {
   kasa export                   write an encrypted backup to all targets
   kasa export --target <dir>    write to a one-off target
   kasa backup ls                which backup is on which target, and how old
-  kasa backup verify <file.age> | --latest [--json]   compare a backup's key names with the vault; exit 0 same, 1 differs, 2 could not open
+  kasa backup verify <file.age> | --latest [--json]   compare a backup's key names with the vault; exit 0 same, 1 differs, 2 could not open, 75 locked
   kasa backup-password status|set|rm
                                 keep the export password in the keychain  [set: human only]
   kasa import <file.age>        restore a backup onto this machine  [after init+unlock]
@@ -371,9 +371,9 @@ func statusKodu(durum string) int {
 // prints {"state","keys","profiles","version"}. The human text is for people:
 // do not grep it from scripts, use the exit code or --json.
 func cmdStatus(args []string) error {
-	f := parseFlags(args)
-	sessiz := f["q"] == "true" || f["quiet"] == "true"
-	jsonCikti := f["json"] == "true"
+	// bayrakVar, not parseFlags: parseFlags would take a word after --json as its value.
+	sessiz := bayrakVar(args, "q", "quiet")
+	jsonCikti := bayrakVar(args, "json")
 	if sessiz && jsonCikti {
 		fmt.Fprintln(os.Stderr, "error: usage: kasa status [-q | --json] (not both)")
 		return cikisKodu(2)

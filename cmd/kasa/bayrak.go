@@ -17,7 +17,7 @@ import (
 type komutTanim struct {
 	yardim  string
 	bayrak  []string // accepted flag names without the dashes (aliases included)
-	ayirici bool     // "--" ends kasa's own flags (run, profile test)
+	ayirici bool     // "--" ends kasa's own flags and starts the child command (run, profile)
 }
 
 // komutTakmaAd: command aliases (the hidden Turkish ones included) -> the name used in komutTanimlari.
@@ -39,7 +39,7 @@ var komutTanimlari = map[string]komutTanim{
 		"  scripts: use the exit code or --json, never grep the text\n", bayrak: []string{"q", "quiet", "json"}},
 	"doctor": {yardim: "usage: kasa doctor [<profile>] [--json]\n  diagnose: vault, readability of the items, backup password, age of the newest backup per target,\n" +
 		"  and (with a profile) the profile's secrets and allow list; every finding says what to do\n" +
-		"  exit: 0 healthy, 1 warning, 2 failure. Prints no secret value.\n", bayrak: []string{"json"}},
+		"  exit: 0 healthy, 1 warning, 2 failure, 75 vault locked. Prints no secret value.\n", bayrak: []string{"json"}},
 	"add": {yardim: "usage: kasa add <namespace/name> [--stdin]\n  add a secret; the value is prompted (hidden), or read from stdin with --stdin\n", bayrak: []string{"stdin"}},
 	"ls":  {yardim: "usage: kasa ls\n  list key names (never values)\n"},
 	"get": {yardim: "usage: kasa get <namespace/name>\n  print the raw value  [human + TTY only]\n"},
@@ -61,14 +61,16 @@ var komutTanimlari = map[string]komutTanim{
 		"  ls      which backup is on which target, and how old\n" +
 		"  verify  open the backup in memory with the keychain backup password and compare the key NAMES with the vault\n" +
 		"          (no plaintext on disk, values never printed); --latest = the newest .age on any target\n" +
-		"          exit: 0 same names, 1 they differ, 2 could not open\n", bayrak: []string{"latest", "json"}},
+		"          exit: 0 same names, 1 they differ, 2 could not open, 75 vault locked\n", bayrak: []string{"latest", "json"}},
 	"backup-password": {yardim: "usage: kasa backup-password [status|set|rm]\n  the export password kept in the keychain  [set, rm: human only]\n"},
 	"acl": {yardim: "usage: kasa acl migrate [--dry-run] [--target <dir>]\n       kasa acl devral <backup.age>\n       kasa acl tasi <backup.age>\n       kasa acl yokla\n" +
 		"  keychain item access (migrate, devral, tasi: human only; yokla: can this build read the items?)\n", bayrak: []string{"dry-run", "prova", "target"}},
 }
 
-// bayrakSekli: whether an argument is flag-shaped. A value such as "- item" or "-5" is not.
-var bayrakSekli = regexp.MustCompile(`^--?[A-Za-z][A-Za-z0-9-]*(=.*)?$`)
+// bayrakSekli: whether an argument is flag-shaped: anything after "--" (so
+// --dry_run is caught and refused, not skipped), or "-" and a letter. A value
+// such as "- item" or "-5" is not.
+var bayrakSekli = regexp.MustCompile(`^(--[^=\s]+|-[A-Za-z][^=\s]*)(=.*)?$`)
 
 // bayrakOnKontrol: for a command in komutTanimlari returns its help when -h or
 // --help is among the flags (nothing may run), or an error plus the help text
@@ -89,7 +91,9 @@ func bayrakOnKontrol(komut string, args []string) (yardim string, err error) {
 	yardimIstendi := false
 	var bilinmeyen string
 	for _, a := range args {
-		if a == "--" {
+		// Only where a child command follows ("run p -- cmd --help") does "--" end
+		// kasa's flags; elsewhere `kasa export -- --help` still sees --help.
+		if a == "--" && t.ayirici {
 			break
 		}
 		if !bayrakSekli.MatchString(a) {

@@ -13,7 +13,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,12 +23,45 @@ import (
 )
 
 // Exit codes of `kasa backup verify`. External scripts depend on them (pinned
-// by TestYedekDogrulaKodlari).
+// by TestYedekDogrulaUctanUca).
 const (
 	dogrulaEsles     = 0
 	dogrulaFark      = 1
 	dogrulaAcilamadi = 2
+	// The vault is locked: the same 75 as every other command (errKilitli), so a
+	// scheduled job reads it as "try again later" and not as a bad backup.
+	exitKilitli = 75
 )
+
+// yedekEnFazla: the largest file verify will read. A kasa backup is a few KB
+// to a few MB; the cap keeps a stray path from filling memory.
+const yedekEnFazla = 64 << 20
+
+// yedekDosyaOku: reads a backup file into memory. Only a regular file is read
+// (a FIFO would block, a device never ends), and only up to yedekEnFazla. The
+// error texts never carry file content.
+func yedekDosyaOku(yol string) ([]byte, error) {
+	fi, err := os.Stat(yol)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the backup file: %s", filepath.Base(yol))
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: %s", filepath.Base(yol))
+	}
+	if fi.Size() > yedekEnFazla {
+		return nil, fmt.Errorf("too large for a kasa backup (limit %d MB): %s", yedekEnFazla>>20, filepath.Base(yol))
+	}
+	f, err := os.Open(yol)
+	if err != nil {
+		return nil, fmt.Errorf("could not read the backup file: %s", filepath.Base(yol))
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, yedekEnFazla+1))
+	if err != nil || len(b) > yedekEnFazla {
+		return nil, fmt.Errorf("could not read the backup file: %s", filepath.Base(yol))
+	}
+	return b, nil
+}
 
 type dogrulaSonuc struct {
 	Result       string   `json:"result"` // match | different | unreadable
@@ -138,12 +173,15 @@ func cmdYedekDogrula(args []string) error {
 			break
 		}
 	}
-	basarisiz := func(msg string) error {
+	basarisiz := func(msg string, kod ...int) error {
 		if jsonCikti {
 			j, _ := json.Marshal(dogrulaSonuc{Result: "unreadable", OnlyInBackup: []string{}, OnlyInVault: []string{}, Error: msg})
 			fmt.Println(string(j))
 		} else {
 			fmt.Fprintln(os.Stderr, "error: "+msg)
+		}
+		if len(kod) > 0 {
+			return cikisKodu(kod[0])
 		}
 		return cikisKodu(dogrulaAcilamadi)
 	}
@@ -164,12 +202,15 @@ func cmdYedekDogrula(args []string) error {
 		}
 	}
 	dosya = expandHome(dosya)
-	enc, err := os.ReadFile(dosya)
+	enc, err := yedekDosyaOku(dosya)
 	if err != nil {
-		return basarisiz("could not read the backup file: " + filepath.Base(dosya))
+		return basarisiz(err.Error())
 	}
 	// Names first: a locked vault stops here (errKilitli) before anything is decrypted.
 	canli, err := kcList()
+	if errors.Is(err, errKilitli) {
+		return basarisiz(err.Error(), exitKilitli)
+	}
 	if err != nil {
 		return basarisiz(err.Error())
 	}

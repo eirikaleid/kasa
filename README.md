@@ -151,6 +151,8 @@ kasa status --json               # {"state":"unlocked","keys":12,"profiles":3,"v
 | `3` | locked (`kasa unlock`) |
 | `4` | no usable vault: not set up, still at the old place, or the move to the new place is unfinished |
 
+Before 2.7.0 `kasa status` exited 0 in every case. A script under `set -e` now stops on a locked vault: read the code on purpose, or write `kasa status || true` to keep the old behaviour.
+
 `state` is `unlocked`, `locked` or `missing`. `keys` is 0 unless the vault is unlocked. Other commands that need an unlocked vault exit with `75` when it is locked.
 
 ```bash
@@ -169,7 +171,8 @@ kasa backup verify ~/Backups/kasa-backup-20261110.age --json
 |---|---|
 | `0` | the same key names |
 | `1` | they differ: the output lists the names only in the backup and only in the vault (refresh with `kasa export`) |
-| `2` | could not open: locked, no backup password stored, no such file, wrong password, no backup on any target |
+| `2` | could not open: no backup password stored, not a regular file or over 64 MB, no such file, not a kasa backup or wrong password, no backup on any target |
+| `75` | the vault is locked (as for every command; try again after `kasa unlock`) |
 
 `--json`: `{"result":"match|different|unreadable","file":"...","created":"...","backup_keys":N,"vault_keys":N,"only_in_backup":[...],"only_in_vault":[...]}`; on exit 2 `error` carries the reason. A value that changed since the backup is not detected: only names are compared. Agent sessions may run it (see [AGENTS.md](AGENTS.md)).
 
@@ -185,7 +188,7 @@ kasa doctor 2.7.0: WARN
         -> kasa export
 ```
 
-It checks that the vault exists and is unlocked, that this binary can read the items (the `kasa acl yokla` probe), that the backup password is stored, and the age of the newest backup per target (over 36 hours is a warning). With a profile name it also checks that the profile exists, that its allow list is not empty (a mail profile needs none) and that each allowed command exists and would pass `profile test`, and that every key the profile uses is in the vault. Exit `0` healthy, `1` warning, `2` failure (no usable vault, locked, items unreadable, unknown profile, missing key). `--json`: `{"status":"ok|warn|fail","version":"...","checks":[{"name","status","detail","fix"}]}`. It prints no secret.
+It checks that the vault exists and is unlocked, that this binary can read the items (the `kasa acl yokla` probe), that the backup password is stored, and the age of the newest backup per target (over 36 hours is a warning). With a profile name it also checks that the profile exists, that its allow list is not empty (a mail profile needs none) and that each allowed command exists and would pass `profile test`, and that every key the profile uses is in the vault. Exit `0` healthy, `1` warning, `2` failure (no usable vault, items unreadable, unreadable `profiles.json`, unknown profile, missing key), `75` locked (the report is still printed). `--json`: `{"status":"ok|warn|fail","version":"...","checks":[{"name","status","detail","fix"}]}`. It prints no secret.
 
 Every subcommand takes `--help`/`-h`, which prints only the usage and does nothing else. An unknown flag is an error with the usage and exit `2`; it never falls through to a default action. The old Turkish flags (`--ustune-yaz`, `--hedef`, `--pencere` and the others) still work.
 
@@ -215,7 +218,7 @@ Every subcommand takes `--help`/`-h`, which prints only the usage and does nothi
 | `kasa export` | Write an encrypted backup to every target | needs backup password |
 | `kasa export --target <dir>` | One-off target (see agent note under [Backups](#backups)) | needs backup password |
 | `kasa backup ls` | Show backups per target and how old they are | anyone |
-| `kasa backup verify <file.age> \| --latest [--json]` | Open a backup in memory and compare its key names with the vault; exit 0 same, 1 differs, 2 could not open | anyone (no value leaves) |
+| `kasa backup verify <file.age> \| --latest [--json]` | Open a backup in memory and compare its key names with the vault; exit 0 same, 1 differs, 2 could not open, 75 locked | anyone (no value leaves) |
 | `kasa backup-password status\|set\|rm` | Manage the stored backup password | set/rm: human |
 | `kasa import <file.age> [--overwrite]` | Restore a backup on this machine | human + TTY only |
 | `kasa acl migrate [--dry-run] [--target <dir>]` | Move items written before 2.5.0 to kasa's own ACL (takes an encrypted backup first, restore-checked) | human only |

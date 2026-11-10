@@ -18,6 +18,8 @@ import (
 
 // yedekUyariSaat: a target whose newest backup is older than this is a warning
 // (a daily backup that missed one day is already visible).
+const doktorKilitliDetay = "locked"
+
 const yedekUyariSaat = 36
 
 type doktorBulgu struct {
@@ -40,7 +42,7 @@ func doktorKos(c *Config, profil string) []doktorBulgu {
 		}
 		ekle("vault", "fail", not, cozum)
 	case "locked":
-		ekle("vault", "fail", "locked", "kasa unlock (in your own terminal; an agent cannot)")
+		ekle("vault", "fail", doktorKilitliDetay, "kasa unlock (in your own terminal; an agent cannot)")
 	default:
 		ekle("vault", "ok", "unlocked", "")
 	}
@@ -178,11 +180,16 @@ func cmdDoctor(args []string) error {
 			break
 		}
 	}
-	c, err := loadConfig()
-	if err != nil || c == nil {
+	c, cfgHata := loadConfig()
+	if cfgHata != nil || c == nil {
+		// A broken profiles.json must not look like "no profiles, all fine".
 		c = &Config{Profiles: map[string]Profile{}}
+		profil = "" // its profile checks would only say "no such profile"
 	}
 	bulgular := doktorKos(c, profil)
+	if cfgHata != nil {
+		bulgular = append(bulgular, doktorBulgu{"config", "fail", cfgHata.Error(), "fix or remove the file (kasa profile path), then run kasa doctor again"})
+	}
 	toplam := doktorToplam(bulgular)
 	if bayrakVar(args, "json") {
 		j, _ := json.Marshal(struct {
@@ -199,6 +206,11 @@ func cmdDoctor(args []string) error {
 				fmt.Printf("        -> %s\n", b.Fix)
 			}
 		}
+	}
+	// Locked: the findings are printed above, the exit code is the same 75 every
+	// other command gives (AGENTS.md rule 5) so a job tells "locked" from "broken".
+	if len(bulgular) > 0 && bulgular[0].Name == "vault" && bulgular[0].Detail == doktorKilitliDetay {
+		return kodDon(exitKilitli)
 	}
 	return kodDon(map[string]int{"ok": 0, "warn": 1, "fail": 2}[toplam])
 }

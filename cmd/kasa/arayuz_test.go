@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -299,8 +300,12 @@ func TestYedekDogrulaUctanUca(t *testing.T) {
 	if err := kcLock(); err != nil {
 		t.Fatal(err)
 	}
-	if kod, _, _ := calis(t, "backup", "verify", dosya); kod != 2 {
-		t.Errorf("locked: %d", kod)
+	// (75, like every command on a locked vault; not 2, which is "bad backup".)
+	if kod, _, errOut := calis(t, "backup", "verify", dosya); kod != 75 || !strings.Contains(errOut, "locked") {
+		t.Errorf("locked: %d %q", kod, errOut)
+	}
+	if kod, out, _ := calis(t, "backup", "verify", "--json", dosya); kod != 75 || jsonAlanlari(t, out)["result"] != "unreadable" {
+		t.Errorf("locked --json: %d %q", kod, out)
 	}
 	// Only the two backup files this test wrote: verify left nothing on disk.
 	var adlar []string
@@ -417,6 +422,10 @@ func TestDoktor(t *testing.T) {
 	if bulguDurumu(b, "vault")[0] != "fail" || doktorToplam(b) != "fail" || len(bulguDurumu(b, "read")) != 0 {
 		t.Errorf("locked: %+v", b)
 	}
+	// The report is still printed; the exit code is 75, as for every locked command.
+	if kod, out, _ := calis(t, "doctor"); kod != 75 || !strings.Contains(out, "FAIL") || !strings.Contains(out, "locked") {
+		t.Errorf("doctor locked: %d %q", kod, out)
+	}
 }
 
 // doctor exit codes and JSON fields are an interface too.
@@ -438,5 +447,148 @@ func TestDoktorKodlari(t *testing.T) {
 	// Unlocked, no target configured: a warning.
 	if kod, out, _ := calis(t, "doctor"); kod != 1 || !strings.Contains(out, "WARN") || !strings.Contains(out, "-> ") {
 		t.Errorf("warning: %d %q", kod, out)
+	}
+}
+
+// verify must never show what is inside a file it is pointed at: age quotes the
+// first bytes of a malformed input in its error, and an agent could otherwise
+// read the first line of any file with `kasa backup verify ~/.env`.
+func TestYedekDogrulaDosyaIcerigiSizmaz(t *testing.T) {
+	profilEvi(t, nil)
+	geciciKasa(t)
+	yazTest(t, service, "a/one", "v")
+	if err := yedekParolaYaz("Yedek-Parola-12345!"); err != nil {
+		t.Fatal(err)
+	}
+	d := t.TempDir()
+	env := filepath.Join(d, ".env")
+	os.WriteFile(env, []byte("SECRET=xyz\nTOKEN=abc123\n"), 0o600)
+	for _, a := range [][]string{{"backup", "verify", env}, {"backup", "verify", "--json", env}} {
+		kod, out, errOut := calis(t, a...)
+		if kod != 2 {
+			t.Errorf("%v: exit %d, want 2", a, kod)
+		}
+		for _, s := range []string{out, errOut} {
+			if strings.Contains(s, "SECRET") || strings.Contains(s, "xyz") || strings.Contains(s, "TOKEN") {
+				t.Errorf("%v leaked file content: %q", a, s)
+			}
+		}
+		if !strings.Contains(out+errOut, "not a kasa backup or wrong password") {
+			t.Errorf("%v: want the constant text, got %q %q", a, out, errOut)
+		}
+	}
+	if _, err := openBundle([]byte("SECRET=xyz\n"), "pw"); err == nil || strings.Contains(err.Error(), "SECRET") || err != errYedekAcilamadi {
+		t.Errorf("openBundle error: %v", err)
+	}
+
+	// Only a regular file up to the cap: a directory, a FIFO (would block) and an oversize file are refused.
+	if kod, _, errOut := calis(t, "backup", "verify", d); kod != 2 || !strings.Contains(errOut, "not a regular file") {
+		t.Errorf("directory: %d %q", kod, errOut)
+	}
+	fifo := filepath.Join(d, "boru")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bitti := make(chan struct{})
+	go func() {
+		defer close(bitti)
+		if kod, _, errOut := calis(t, "backup", "verify", fifo); kod != 2 || !strings.Contains(errOut, "not a regular file") {
+			t.Errorf("fifo: %d %q", kod, errOut)
+		}
+	}()
+	select {
+	case <-bitti:
+	case <-time.After(10 * time.Second):
+		t.Fatal("verify blocked on a FIFO")
+	}
+	buyuk := filepath.Join(d, "buyuk.age")
+	bf, _ := os.Create(buyuk)
+	bf.Truncate(yedekEnFazla + 1) // sparse: no real disk use
+	bf.Close()
+	if kod, _, errOut := calis(t, "backup", "verify", buyuk); kod != 2 || !strings.Contains(errOut, "too large") {
+		t.Errorf("oversize: %d %q", kod, errOut)
+	}
+}
+
+// A broken profiles.json is a finding, not "no profiles, all well".
+func TestDoktorBozukProfilDosyasi(t *testing.T) {
+	ev := profilEvi(t, nil)
+	geciciKasa(t)
+	yazTest(t, service, "x/one", "v")
+	if err := os.WriteFile(filepath.Join(ev, ".config", "kasa", "profiles.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kod, out, _ := calis(t, "doctor", "--json")
+	m := jsonAlanlari(t, out)
+	var bulundu bool
+	for _, c := range m["checks"].([]any) {
+		c := c.(map[string]any)
+		if c["name"] == "config" && c["status"] == "fail" && c["fix"] != "" {
+			bulundu = true
+		}
+	}
+	if kod != 2 || m["status"] != "fail" || !bulundu {
+		t.Errorf("corrupt profiles.json: exit %d, %v", kod, m)
+	}
+	// With a profile named too: still the config finding, exit 2.
+	if kod, out, _ := calis(t, "doctor", "p"); kod != 2 || !strings.Contains(out, "config") {
+		t.Errorf("corrupt profiles.json with a profile: %d %q", kod, out)
+	}
+}
+
+// "--" ends kasa's flags only where a child command follows; and anything that
+// looks like a long flag is checked, underscores included.
+func TestBayrakAyiriciVeSekil(t *testing.T) {
+	profilEvi(t, nil)
+	// run: flags after "--" are the child's.
+	if y, err := bayrakOnKontrol("run", []string{"p", "--", "tool", "--help", "--x"}); y != "" || err != nil {
+		t.Errorf("run child flags: %q %v", y, err)
+	}
+	// export: "--" does not hide --help (it used to start the export) ...
+	if y, err := bayrakOnKontrol("export", []string{"--", "--help"}); err != nil || y != komutTanimlari["export"].yardim {
+		t.Errorf("export -- --help: %q %v", y, err)
+	}
+	if kod, out, _ := calis(t, "export", "--", "--help"); kod != 0 || out != komutTanimlari["export"].yardim {
+		t.Errorf("export -- --help ran: %d %q", kod, out)
+	}
+	// ... nor an unknown flag.
+	if _, err := bayrakOnKontrol("export", []string{"--", "--bogus"}); err == nil {
+		t.Error("export -- --bogus must be refused")
+	}
+	// --dry_run (underscore) is a flag shape and unknown to acl (which has --dry-run).
+	for _, a := range [][]string{{"acl", "--dry_run"}, {"export", "--dry_run"}, {"status", "--json_x"}} {
+		if kod, _, errOut := calis(t, a...); kod != 2 || !strings.Contains(errOut, "unknown flag") {
+			t.Errorf("%v: %d %q", a, kod, errOut)
+		}
+	}
+	for _, v := range []string{"-5", "- item", "plain", "--"} {
+		if bayrakSekli.MatchString(v) {
+			t.Errorf("%q must not be flag-shaped", v)
+		}
+	}
+	for _, v := range []string{"--dry_run", "--a", "-q", "--x=1", "-h"} {
+		if !bayrakSekli.MatchString(v) {
+			t.Errorf("%q must be flag-shaped", v)
+		}
+	}
+}
+
+// A word after -q or --json must not swallow the flag (parseFlags took it as the value).
+func TestStatusBayrakSonrasiKelime(t *testing.T) {
+	profilEvi(t, nil)
+	geciciKasa(t)
+	yazTest(t, service, "x/one", "v")
+	if kod, out, _ := calis(t, "status", "-q", "x"); kod != 0 || out != "" {
+		t.Errorf("-q x: %d %q", kod, out)
+	}
+	kod, out, _ := calis(t, "status", "--json", "x")
+	if m := jsonAlanlari(t, out); kod != 0 || m["state"] != "unlocked" {
+		t.Errorf("--json x: %d %v", kod, m)
+	}
+	if kod, out, _ := calis(t, "status", "x", "--json"); kod != 0 || jsonAlanlari(t, out)["keys"] != float64(1) {
+		t.Errorf("x --json: %d %q", kod, out)
+	}
+	if kod, _, errOut := calis(t, "status", "-q", "--json"); kod != 2 || !strings.Contains(errOut, "not both") {
+		t.Errorf("-q --json: %d %q", kod, errOut)
 	}
 }
