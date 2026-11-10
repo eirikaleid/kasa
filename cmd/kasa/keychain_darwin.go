@@ -18,11 +18,21 @@ package main
 // call (SecKeychainSetUserInteractionAllowed(false)). The dialog is opened only
 // by kcPencereyleAc, deliberately (lock_darwin.go).
 //
-// ACL: items are written with the same access list as old items written by
-// `security add-generic-password`: the trusted application is /usr/bin/security.
-// This way old and new items are read the same way, and when kasa is rebuilt
-// (signature/cdhash changes) the keychain does not ask "kasa wants to access
-// this item".
+// ACL: items are written with an access list whose only trusted application
+// is the running kasa binary (SecTrustedApplicationCreateFromPath(NULL)). The
+// entry stores kasa's designated requirement; `make build` signs kasa with the
+// user's own code-signing certificate, so the requirement is
+// `identifier "kasa" and certificate leaf = H"..."`, not a cdhash: a rebuilt
+// kasa signed with the same certificate reads without a prompt, while
+// /usr/bin/security, an ad-hoc copy or any other process of the same user gets
+// errSecAuthFailed (interaction is disabled, no dialog). Reading is done here
+// too (kasaOkuC), not through the security CLI.
+//
+// Items written before 2.5.0 trust /usr/bin/security; `kasa acl migrate`
+// rebinds them, `kasa acl repair` does the same after the signing certificate
+// changed. Both change the ACL with the vault's master password
+// (SecKeychainItemSetAccessWithPassword), so they work without the old
+// certificate.
 
 /*
 #cgo LDFLAGS: -framework Security -framework CoreFoundation
@@ -31,6 +41,13 @@ package main
 #include <string.h>
 #include <limits.h>
 #include <Security/Security.h>
+
+// Exported by Security.framework but declared only in the private header
+// SecKeychainItemPriv.h (`security set-generic-password-partition-list -k`
+// uses it): changes an item's ACL with the keychain password as the owner
+// credential, instead of asking the user in a dialog.
+extern OSStatus SecKeychainItemSetAccessWithPassword(SecKeychainItemRef itemRef,
+		SecAccessRef access, UInt32 passwordLength, const void *password);
 
 // sifirla: zeroing that the compiler cannot optimize away as a "dead store".
 static void sifirla(void *p, size_t n) {
@@ -122,11 +139,10 @@ static void kasaSerbestC(void *veri, UInt32 n) {
 	SecKeychainItemFreeContent(NULL, veri);
 }
 
-// guvenilenErisim: same ACL as `security add-generic-password` (without -T):
-// only /usr/bin/security can read without a prompt.
-static OSStatus guvenilenErisim(const char *etiket, SecAccessRef *erisim) {
+// kendiErisim: an ACL whose only trusted application is the running kasa.
+static OSStatus kendiErisim(const char *etiket, SecAccessRef *erisim) {
 	SecTrustedApplicationRef app = NULL;
-	OSStatus r = SecTrustedApplicationCreateFromPath("/usr/bin/security", &app);
+	OSStatus r = SecTrustedApplicationCreateFromPath(NULL, &app);
 	if (r != errSecSuccess) return r;
 	CFStringRef ad = CFStringCreateWithCString(NULL, etiket, kCFStringEncodingUTF8);
 	const void *uygulamalar[] = { app };
@@ -135,6 +151,95 @@ static OSStatus guvenilenErisim(const char *etiket, SecAccessRef *erisim) {
 	CFRelease(liste);
 	CFRelease(ad);
 	CFRelease(app);
+	return r;
+}
+
+// tekUygulamaMi: 1 if every decrypt entry of the item's ACL names exactly one
+// trusted application (no "any application" entry, no second app).
+static int tekUygulamaMi(SecKeychainItemRef oge) {
+	SecAccessRef erisim = NULL;
+	if (SecKeychainItemCopyAccess(oge, &erisim) != errSecSuccess || erisim == NULL) return 0;
+	CFArrayRef acller = SecAccessCopyMatchingACLList(erisim, kSecACLAuthorizationDecrypt);
+	int tamam = acller != NULL && CFArrayGetCount(acller) > 0;
+	for (CFIndex i = 0; tamam && i < CFArrayGetCount(acller); i++) {
+		CFArrayRef uyg = NULL;
+		CFStringRef ac = NULL;
+		SecKeychainPromptSelector ps = 0;
+		if (SecACLCopyContents((SecACLRef)CFArrayGetValueAtIndex(acller, i), &uyg, &ac, &ps) != errSecSuccess) {
+			tamam = 0;
+		} else {
+			if (uyg == NULL || CFArrayGetCount(uyg) != 1) tamam = 0;
+		}
+		if (uyg) CFRelease(uyg);
+		if (ac) CFRelease(ac);
+	}
+	if (acller) CFRelease(acller);
+	CFRelease(erisim);
+	return tamam;
+}
+
+// kasaBagliMiC: *bagli = 1 if the running kasa reads the item without a prompt
+// and the ACL trusts only one application (which must then be this kasa).
+// errSecAuthFailed on the read is not an error here: it means "not bound".
+static OSStatus kasaBagliMiC(const char *yol, const char *svc, const char *acct, int *bagli) {
+	SecKeychainRef kc = NULL;
+	*bagli = 0;
+	OSStatus r = kcAc(yol, &kc);
+	if (r != errSecSuccess) return r;
+	SecKeychainItemRef oge = NULL;
+	UInt32 n = 0;
+	void *veri = NULL;
+	r = SecKeychainFindGenericPassword(kc, (UInt32)strlen(svc), svc, (UInt32)strlen(acct), acct, &n, &veri, &oge);
+	if (veri) { sifirla(veri, n); SecKeychainItemFreeContent(NULL, veri); }
+	if (r == errSecSuccess) {
+		*bagli = tekUygulamaMi(oge);
+	} else if (r == errSecAuthFailed) {
+		r = errSecSuccess;
+	}
+	if (oge) CFRelease(oge);
+	CFRelease(kc);
+	return r;
+}
+
+// kasaBaglaC: points every decrypt entry of the item's existing ACL at the
+// running kasa (SecACLSetContents only edits the local copy), then writes the
+// ACL back authorized by the keychain's master password: it works without the
+// old certificate. The owner entry is kept as it is (measured: replacing the
+// whole ACL with a fresh SecAccessCreate one is refused with errSecAuthFailed).
+static OSStatus kasaBaglaC(const char *yol, const char *svc, const char *acct, const void *pw, UInt32 n) {
+	SecKeychainRef kc = NULL;
+	OSStatus r = kcAc(yol, &kc);
+	if (r != errSecSuccess) return r;
+	SecKeychainItemRef oge = NULL;
+	SecAccessRef erisim = NULL;
+	SecTrustedApplicationRef app = NULL;
+	CFArrayRef kendi = NULL, acller = NULL;
+	r = SecKeychainFindGenericPassword(kc, (UInt32)strlen(svc), svc, (UInt32)strlen(acct), acct, NULL, NULL, &oge);
+	if (r == errSecSuccess) r = SecKeychainItemCopyAccess(oge, &erisim);
+	if (r == errSecSuccess) r = SecTrustedApplicationCreateFromPath(NULL, &app);
+	if (r == errSecSuccess) {
+		const void *uygulamalar[] = { app };
+		kendi = CFArrayCreate(NULL, uygulamalar, 1, &kCFTypeArrayCallBacks);
+		acller = SecAccessCopyMatchingACLList(erisim, kSecACLAuthorizationDecrypt);
+		if (acller == NULL || CFArrayGetCount(acller) == 0) r = errSecACLNotSimple;
+	}
+	for (CFIndex i = 0; r == errSecSuccess && i < CFArrayGetCount(acller); i++) {
+		SecACLRef acl = (SecACLRef)CFArrayGetValueAtIndex(acller, i);
+		CFArrayRef uyg = NULL;
+		CFStringRef ac = NULL;
+		SecKeychainPromptSelector ps = 0;
+		r = SecACLCopyContents(acl, &uyg, &ac, &ps);
+		if (r == errSecSuccess) r = SecACLSetContents(acl, kendi, ac, ps);
+		if (uyg) CFRelease(uyg);
+		if (ac) CFRelease(ac);
+	}
+	if (r == errSecSuccess) r = SecKeychainItemSetAccessWithPassword(oge, erisim, n, pw);
+	if (acller) CFRelease(acller);
+	if (kendi) CFRelease(kendi);
+	if (app) CFRelease(app);
+	if (erisim) CFRelease(erisim);
+	if (oge) CFRelease(oge);
+	CFRelease(kc);
 	return r;
 }
 
@@ -157,7 +262,7 @@ static OSStatus kasaYazC(const char *yol, const char *svc, const char *acct,
 		return r;
 	}
 	SecAccessRef erisim = NULL;
-	r = guvenilenErisim(svc, &erisim);
+	r = kendiErisim(svc, &erisim);
 	if (r != errSecSuccess) {
 		CFRelease(kc);
 		return r;
@@ -322,6 +427,30 @@ func kcSilYol(yol, svc, acct string) error {
 	defer C.free(unsafe.Pointer(cs))
 	defer C.free(unsafe.Pointer(ca))
 	return osHata(C.kasaSilC(cy, cs, ca))
+}
+
+// kcBagliMiYol: is the item bound to the running kasa only (see kasaBagliMiC)?
+func kcBagliMiYol(yol, svc, acct string) (bool, error) {
+	cy, cs, ca := C.CString(yol), C.CString(svc), C.CString(acct)
+	defer C.free(unsafe.Pointer(cy))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(ca))
+	var b C.int
+	if err := osHata(C.kasaBagliMiC(cy, cs, ca, &b)); err != nil {
+		return false, err
+	}
+	return b == 1, nil
+}
+
+// kcBaglaYol: rebinds the item's ACL to the running kasa with the master password.
+func kcBaglaYol(yol, svc, acct string, parola []byte) error {
+	cy, cs, ca := C.CString(yol), C.CString(svc), C.CString(acct)
+	defer C.free(unsafe.Pointer(cy))
+	defer C.free(unsafe.Pointer(cs))
+	defer C.free(unsafe.Pointer(ca))
+	t := yeniTampon(parola)
+	defer t.birak()
+	return osHata(C.kasaBaglaC(cy, cs, ca, t.p, t.n))
 }
 
 // kcKeychainSilYol: used by tests only (temporary keychain cleanup).

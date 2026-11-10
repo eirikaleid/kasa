@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.4.0"
+const version = "2.5.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -74,6 +74,8 @@ func main() {
 		err = cmdYedek(os.Args[2:])
 	case "backup-password", "yedek-parola":
 		err = cmdYedekParola(os.Args[2:])
+	case "acl":
+		err = cmdAcl(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println("kasa " + version)
 	case "help", "-h", "--help":
@@ -129,6 +131,9 @@ func usage() {
   kasa backup-password status|set|rm
                                 keep the export password in the keychain  [set: human only]
   kasa import <file.age>        restore a backup onto this machine  [after init+unlock]
+
+  kasa acl migrate [--dry-run]  bind items written before 2.5.0 to this kasa only  [human only, master password]
+  kasa acl repair  [--dry-run]  rebind all items after the signing certificate changed  [human only, master password]
 
 Key format: <namespace>/<name>  e.g. mail/pass, github/token, stripe/live_key
 `)
