@@ -136,12 +136,67 @@ Ready-made files:
 
 The one rule for agents: never ask the user to paste a secret, never call `kasa get`, use `kasa run`. If `kasa` exits with `75`, it is locked: ask the human to run `kasa unlock`.
 
+## Using from scripts
+
+Scripts that call kasa should read the **exit code** or `--json`, never the text. Since 2.4 the human output is English; a script that grepped the old Turkish `durum : acik` kept running and silently skipped its work for days. The text is for people and may change. The exit codes and JSON fields below are a fixed interface, pinned by tests: they change only in a major release.
+
+```bash
+kasa status -q                   # prints nothing, only the exit code
+kasa status --json               # {"state":"unlocked","keys":12,"profiles":3,"version":"2.7.0"}
+```
+
+| `kasa status` exit | Meaning |
+|---|---|
+| `0` | unlocked |
+| `3` | locked (`kasa unlock`) |
+| `4` | no usable vault: not set up, still at the old place, or the move to the new place is unfinished |
+
+`state` is `unlocked`, `locked` or `missing`. `keys` is 0 unless the vault is unlocked. Other commands that need an unlocked vault exit with `75` when it is locked.
+
+```bash
+if ! kasa status -q; then echo "vault not open (exit $?)"; exit 1; fi
+kasa run backup-job -- ./nightly.sh
+```
+
+**`kasa backup verify <file.age> | --latest`** checks that a backup still matches the vault. It opens the file in memory with the backup password from the keychain (the one `export` uses; it is never asked for), writes no plaintext to disk and compares only key **names** with the live vault. Values are never printed, and the vault's values are not even read. `--latest` takes the newest `.age` over all targets.
+
+```bash
+kasa backup verify --latest
+kasa backup verify ~/Backups/kasa-backup-20261110.age --json
+```
+
+| Exit | Meaning |
+|---|---|
+| `0` | the same key names |
+| `1` | they differ: the output lists the names only in the backup and only in the vault (refresh with `kasa export`) |
+| `2` | could not open: locked, no backup password stored, no such file, wrong password, no backup on any target |
+
+`--json`: `{"result":"match|different|unreadable","file":"...","created":"...","backup_keys":N,"vault_keys":N,"only_in_backup":[...],"only_in_vault":[...]}`; on exit 2 `error` carries the reason. A value that changed since the backup is not detected: only names are compared. Agent sessions may run it (see [AGENTS.md](AGENTS.md)).
+
+**`kasa doctor [profile]`** is the first thing to run when a script stops working: one line per check, and what to do about it.
+
+```text
+kasa doctor 2.7.0: WARN
+  OK    vault            unlocked
+  OK    read             ok: this kasa reads the vault's items
+  WARN  backup-password  not stored: export and backup verify cannot run unattended
+        -> kasa backup-password set (human only)
+  WARN  backup           /Volumes/Backup/kasa: newest backup is 51 h old (limit 36 h)
+        -> kasa export
+```
+
+It checks that the vault exists and is unlocked, that this binary can read the items (the `kasa acl yokla` probe), that the backup password is stored, and the age of the newest backup per target (over 36 hours is a warning). With a profile name it also checks that the profile exists, that its allow list is not empty (a mail profile needs none) and that each allowed command exists and would pass `profile test`, and that every key the profile uses is in the vault. Exit `0` healthy, `1` warning, `2` failure (no usable vault, locked, items unreadable, unknown profile, missing key). `--json`: `{"status":"ok|warn|fail","version":"...","checks":[{"name","status","detail","fix"}]}`. It prints no secret.
+
+Every subcommand takes `--help`/`-h`, which prints only the usage and does nothing else. An unknown flag is an error with the usage and exit `2`; it never falls through to a default action. The old Turkish flags (`--ustune-yaz`, `--hedef`, `--pencere` and the others) still work.
+
 ## Commands
 
 | Command | Description | Who |
 |---|---|---|
 | `kasa init` | Create the keychain (once) | human |
 | `kasa unlock` / `kasa lock` / `kasa status` | Unlock, lock, show state and caller | unlock: human |
+| `kasa status [-q \| --json]` | Machine interface: exit 0 unlocked, 3 locked, 4 no vault; `-q` prints nothing; see [Using from scripts](#using-from-scripts) | anyone |
+| `kasa doctor [profile] [--json]` | Diagnose vault, readability, backup password, backup age, profile; exit 0 / 1 warning / 2 failure | anyone |
 | `kasa unlock --gui` | Unlock through the macOS password dialog | human |
 | `kasa morning` | Ask for the password via dialog if not unlocked today (for [launchd](contrib/launchd/README.md)) | scheduler |
 | `kasa add <ns/key>` | Add a secret (hidden prompt) | human |
@@ -160,6 +215,7 @@ The one rule for agents: never ask the user to paste a secret, never call `kasa 
 | `kasa export` | Write an encrypted backup to every target | needs backup password |
 | `kasa export --target <dir>` | One-off target (see agent note under [Backups](#backups)) | needs backup password |
 | `kasa backup ls` | Show backups per target and how old they are | anyone |
+| `kasa backup verify <file.age> \| --latest [--json]` | Open a backup in memory and compare its key names with the vault; exit 0 same, 1 differs, 2 could not open | anyone (no value leaves) |
 | `kasa backup-password status\|set\|rm` | Manage the stored backup password | set/rm: human |
 | `kasa import <file.age> [--overwrite]` | Restore a backup on this machine | human + TTY only |
 | `kasa acl migrate [--dry-run] [--target <dir>]` | Move items written before 2.5.0 to kasa's own ACL (takes an encrypted backup first, restore-checked) | human only |

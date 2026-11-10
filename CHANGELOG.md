@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.7.0 — 2026-11-10
+
+A stable machine interface and self-diagnosing commands. Scripts that grepped `kasa status` text broke silently when the output turned English in 2.4 (a backup job skipped four days); they now read exit codes or JSON.
+
+- **`kasa status` contract:** exit 0 unlocked, 3 locked, 4 no usable vault (not set up, still at the old place, or an unfinished move). `-q` prints nothing; `--json` prints `{"state":"unlocked|locked|missing","keys":N,"profiles":N,"version":"..."}` (`keys` is 0 unless unlocked). The human text is unchanged and is NOT part of the contract. `-q` with `--json` is a usage error (2). Pinned by `TestStatusSozlesmesi`.
+- **`kasa backup verify <file.age> | --latest [--json]`:** opens a backup in memory with the keychain's backup password (never prompts), writes no plaintext, compares key names only with the live vault (no vault value is read) and never prints a value. `--latest` is the newest `.age` over all targets. Exit 0 same names, 1 differ, 2 could not open. Allowed in agent sessions: it moves no value out and uses only what `export` already uses. A changed value is not detected.
+- **`kasa doctor [profile] [--json]`:** vault exists and unlocked, this binary reads items (the `acl yokla` probe), backup password stored, newest backup per target (over 36 h warns); with a profile also: exists, allow list not empty (mail profiles need none), each allowed command passes the `profile test` logic, every key it uses is in the vault. One line per check with what to do. Exit 0 ok, 1 warning, 2 failure. Prints no secret.
+- **Flag safety for every subcommand:** an unknown flag is an error with the usage and exit 2 (it used to fall through to the default action); `--help` / `-h` prints only the usage and does no work. The hidden legacy Turkish aliases and flags (`ustune-yaz`, `hedef`, `yedek-parola`, `durum`, `ayarla`, ...) keep working. `kasaMain` returns the exit code so tests drive the CLI in-process.
+- Tests: `TestStatusSozlesmesi`, `TestStatusEskiYer`, `TestYardimYanEtkisiz` (every command and alias: help only, unknown flag exits 2, vault and files untouched), `TestEskiTakmaAdlarGecer`, `TestYedekDogrula*`, `TestEnYeniYedekTumHedefler`, `TestDoktor*`; all in temporary keychains and home directories.
+- Docs: README (EN/TR, "Using from scripts"), AGENTS.md, skills/kasa.
+
 ## 2.6.0 — 2026-11-10
 
 Correction: a rebuild signed with the same certificate did NOT read the vault (2.5.0 said it did). The vault moves so that it does.

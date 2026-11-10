@@ -19,3 +19,6 @@ audit.log
 *.pfx
 *.pem
 *.key
+
+# go build in cmd/kasa drops the binary here
+/cmd/kasa/kasa

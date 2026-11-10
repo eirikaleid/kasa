@@ -888,26 +888,28 @@ func aclTasi(dosya string) error {
 // `make install` uses it as its gate: the question is "can the new binary
 // read", not "is it the same binary".
 func aclYokla() int {
+	kod, satir := aclYoklaSonuc()
+	fmt.Println(satir)
+	return kod
+}
+
+// aclYoklaSonuc: the probe of aclYokla without printing (doctor uses it too).
+func aclYoklaSonuc() (kod int, satir string) {
 	if e := eskiKasaYolu(); e != "" {
 		if keychainExists() {
-			fmt.Println("move-unfinished: the new vault holds only part of the items; the old vault is still at " + e)
-		} else {
-			fmt.Println("old-place: the vault is still at " + e)
+			return 2, "move-unfinished: the new vault holds only part of the items; the old vault is still at " + e
 		}
-		return 2
+		return 2, "old-place: the vault is still at " + e
 	}
 	if !keychainExists() {
-		fmt.Println("untested: no vault")
-		return 0
+		return 0, "untested: no vault"
 	}
 	if isLocked() {
-		fmt.Println("untested: the vault is locked")
-		return 0
+		return 0, "untested: the vault is locked"
 	}
 	ogeler, err := kcOgeler()
 	if err != nil {
-		fmt.Println("error: " + err.Error())
-		return 3
+		return 3, "error: " + err.Error()
 	}
 	var aday *ogeKaydi
 	for i, o := range ogeler {
@@ -920,18 +922,14 @@ func aclYokla() int {
 		}
 	}
 	if aday == nil {
-		fmt.Println("untested: the vault has no item")
-		return 0
+		return 0, "untested: the vault has no item"
 	}
 	switch _, err := kcOkuYol(keychainPath(), aday.svc, aday.acct); {
 	case err == nil:
-		fmt.Println("ok: this kasa reads the vault's items")
-		return 0
+		return 0, "ok: this kasa reads the vault's items"
 	case errors.Is(err, errYetkisiz):
-		fmt.Println("unreadable: another build wrote the items (-25293)")
-		return 1
+		return 1, "unreadable: another build wrote the items (-25293)"
 	default:
-		fmt.Println("error: " + err.Error())
-		return 3
+		return 3, "error: " + err.Error()
 	}
 }
