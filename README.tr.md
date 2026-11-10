@@ -17,7 +17,7 @@
 
 > [!CAUTION]
 > **ÖNEMLİ: imza sertifikanı koru.**
-> kasa'yı kuran kişi kendinden imzalı bir kod imzalama sertifikası oluşturur (`make cert`). Kasanın kalemleri tek bir derlemeye değil bu sertifikaya güvenir. Sertifikayı kaybedersen kasa artık kasayı okuyamaz ve ana parola bunu onarmaz. Şifreli `.p12` yedeğini güvenli bir yerde, bu makinenin dışında da sakla ve kimseyle paylaşma: sertifikaya sahip olan kasa kılığına girebilir. Kurtarma yolları [Sertifika kaybı](#sertifika-kaybı) bölümünde.
+> kasa'yı kuran kişi kendinden imzalı bir kod imzalama sertifikası oluşturur (`make cert`). Kasanın kalemleri bu sertifikaya ve macOS partition list'i yoluyla onları yazan kasa derlemesine güvenir: yükseltme kalemleri devreder (`make install DEVIR_YEDEK=`). Sertifikayı kaybedersen kasa artık kasayı okuyamaz ve ana parola bunu onarmaz. Şifreli `.p12` yedeğini güvenli bir yerde, bu makinenin dışında da sakla ve kimseyle paylaşma: sertifikaya sahip olan kasa kılığına girebilir. Kurtarma yolları [Sertifika kaybı](#sertifika-kaybı) bölümünde.
 
 ## Neden
 
@@ -72,7 +72,7 @@ kasa run github -- gh pr list
   <img src="assets/terminal-demo.svg" alt="Terminal gösterimi: sır ekleme, anahtar listeleme, ajanda get reddi, ajanda run başarısı" width="900">
 </p>
 
-**Yeni makinede** (etkileşimsiz bir kurulum betiğinden de) `make cert-hazir && make install` çalıştırın. `make cert-hazir` idempotenttir: `local.mk` anahtarlıkta bulunan bir `SIGN_IDENTITY` adlandırıyorsa hiçbir şey yapmaz; yoksa ve `.p12` yedeği varsa (`CERT_P12=<dosya>`, varsayılan `~/kasa-signing-cert.p12`) onu içe aktarır ve SHA-1'ini `local.mk`'ye yazar: geri yüklenen sertifika hep sahip olduğu SHA-1'e sahiptir, kasadaki mevcut kalemler okunur. Yedek de yoksa **yeni** bir sertifika üretir (`make cert` yolu); bu, mevcut bir kasanın kalemlerini okuyamaz (`kasa import` gerekir). `.p12` parolası `KASA_CERT_P12_PASSPHRASE`'den alınır ya da `/dev/tty`'den gizli okunur; ikisi de yoksa betik hatayla durur. Parola hiçbir zaman komut satırına girmez. `KEYCHAIN=<dosya>` başka bir anahtarlığı hedefler.
+**Yeni makinede** (etkileşimsiz bir kurulum betiğinden de) `make cert-hazir && make install` çalıştırın. `make cert-hazir` idempotenttir: `local.mk` anahtarlıkta bulunan bir `SIGN_IDENTITY` adlandırıyorsa hiçbir şey yapmaz; yoksa ve `.p12` yedeği varsa (`CERT_P12=<dosya>`, varsayılan `~/kasa-signing-cert.p12`) onu içe aktarır ve SHA-1'ini `local.mk`'ye yazar: geri yüklenen sertifika hep sahip olduğu SHA-1'e sahiptir; aynı kaynağın bayt-bayt aynı derlemesi kasadaki mevcut kalemleri okur (başka derleme devir ister). Yedek de yoksa **yeni** bir sertifika üretir (`make cert` yolu); bu, mevcut bir kasanın kalemlerini okuyamaz (`kasa import` gerekir). `.p12` parolası `KASA_CERT_P12_PASSPHRASE`'den alınır ya da `/dev/tty`'den gizli okunur; ikisi de yoksa betik hatayla durur. Parola hiçbir zaman komut satırına girmez. `KEYCHAIN=<dosya>` başka bir anahtarlığı hedefler.
 
 `make cert`, `SIGN_IDENTITY` değerini `local.mk`'ye yazar; `local.mk` zaten bir sertifikayı adlandırıyorsa yeniden çalışmayı reddeder. Sertifika yoksa `make build` sessizce ad-hoc imzalamak yerine hata verir (ad-hoc bir kasa bir sonraki derlemede kasayı kaybeder). `make build ADHOC=1` bunu bilerek, uyarıyla yapar.
 

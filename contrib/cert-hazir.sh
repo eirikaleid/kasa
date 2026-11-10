@@ -10,7 +10,7 @@
 #    -> nothing to do, exit 0.
 # 2. otherwise, if the .p12 backup exists (default ~/kasa-signing-cert.p12)
 #    -> import it, write its SHA-1 to local.mk. The restored certificate has
-#    the SHA-1 it always had, so items written under it are readable again.
+#    the SHA-1 it always had; a byte-identical build reads the items again.
 # 3. otherwise -> a NEW certificate (contrib/make-cert.sh). A new certificate
 #    cannot read the items of an existing vault: those need `kasa import`.
 #
@@ -138,7 +138,7 @@ mv "$tmp/local.mk" "$localmk"
 
 cat <<MSG
 certificate restored from $p12
-SHA-1:       $sha1   (the same as before: existing items are readable again)
+SHA-1:       $sha1   (the same as before: a byte-identical build reads existing items)
 keychain:    $keychain
 local.mk:    SIGN_IDENTITY written to $localmk
 The first \`make build\` may ask once to let codesign use the key: choose "Always Allow".

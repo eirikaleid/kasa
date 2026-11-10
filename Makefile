@@ -57,7 +57,7 @@ cert:
 	./contrib/make-cert.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")
 
 # Non-interactive-safe and idempotent (see contrib/cert-hazir.sh): ready ->
-# nothing; else the .p12 backup is restored (same SHA-1, old items readable);
+# nothing; else the .p12 backup is restored (same SHA-1; old items readable by a byte-identical build only);
 # else a NEW certificate. The .p12 passphrase: KASA_CERT_P12_PASSPHRASE or /dev/tty.
 cert-hazir:
 	./contrib/cert-hazir.sh $(if $(KEYCHAIN),--keychain "$(KEYCHAIN)") $(if $(CERT_CN),--cn "$(CERT_CN)") $(if $(CERT_P12),--p12 "$(CERT_P12)")

@@ -17,7 +17,7 @@
 
 > [!CAUTION]
 > **IMPORTANT: protect your signing certificate.**
-> The person who installs kasa creates a self-signed code-signing certificate (`make cert`). The vault's items trust that certificate, not one build of kasa. If you lose it, kasa can no longer read the vault, and nothing can read it for you: there is no master-password repair. Keep the encrypted `.p12` backup somewhere safe, off this machine too, and never share it: whoever holds it can pass as kasa. Recovery paths are under [Lost certificate](#lost-certificate).
+> The person who installs kasa creates a self-signed code-signing certificate (`make cert`). The vault's items trust that certificate and, through the macOS partition list, the kasa build that wrote them: an upgrade hands them over (`make install DEVIR_YEDEK=`, see [Signing certificate and migration](#signing-certificate-and-migration)). If you lose it, kasa can no longer read the vault, and nothing can read it for you: there is no master-password repair. Keep the encrypted `.p12` backup somewhere safe, off this machine too, and never share it: whoever holds it can pass as kasa. Recovery paths are under [Lost certificate](#lost-certificate).
 
 ## Why
 
@@ -41,7 +41,7 @@ kasa profile edit            # define which secrets go to which commands
 kasa run github -- gh pr list
 ```
 
-**On a new machine** (also from a non-interactive setup script) run `make cert-hazir && make install`. `make cert-hazir` is idempotent: if `local.mk` names a `SIGN_IDENTITY` that is in the keychain it does nothing; otherwise, if the `.p12` backup exists (`CERT_P12=<file>`, default `~/kasa-signing-cert.p12`), it imports it and writes its SHA-1 to `local.mk`: the restored certificate has the SHA-1 it always had, so the vault's existing items are readable. Only when there is no backup does it create a **new** certificate (the `make cert` path), which cannot read items of an existing vault (`kasa import` needed). The `.p12` passphrase is taken from `KASA_CERT_P12_PASSPHRASE` or read hidden from `/dev/tty`; with neither, the script stops with an error. It never goes on a command line. `KEYCHAIN=<file>` targets another keychain.
+**On a new machine** (also from a non-interactive setup script) run `make cert-hazir && make install`. `make cert-hazir` is idempotent: if `local.mk` names a `SIGN_IDENTITY` that is in the keychain it does nothing; otherwise, if the `.p12` backup exists (`CERT_P12=<file>`, default `~/kasa-signing-cert.p12`), it imports it and writes its SHA-1 to `local.mk`: the restored certificate has the SHA-1 it always had, so a byte-identical build of the same source reads the vault's existing items (any other build needs the handover). Only when there is no backup does it create a **new** certificate (the `make cert` path), which cannot read items of an existing vault (`kasa import` needed). The `.p12` passphrase is taken from `KASA_CERT_P12_PASSPHRASE` or read hidden from `/dev/tty`; with neither, the script stops with an error. It never goes on a command line. `KEYCHAIN=<file>` targets another keychain.
 
 `make cert` writes `SIGN_IDENTITY` to `local.mk` and refuses to run again while `local.mk` names a certificate. Without a certificate `make build` fails instead of signing ad-hoc (an ad-hoc kasa would lose the vault on its next rebuild). `make build ADHOC=1` does it deliberately, with a warning.
 
