@@ -9,10 +9,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // kasa acl migrate [--dry-run] [--target <dir>]
@@ -301,9 +305,31 @@ var gocGeriOku = kcOkuYol
 // is written again at once. The value never leaves this function except into
 // the keychain.
 func ogeTasi(o ogeKaydi, deger string) error {
+	// Between the delete and the verified rewrite the item exists nowhere but in
+	// this process: a SIGINT/SIGTERM/SIGHUP there would lose it, so they are held
+	// until the item is back and the run stops right after (errKesildi).
+	ch := make(chan os.Signal, 4)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(ch)
+	err := ogeTasiIc(o, deger)
+	if err == nil && len(ch) > 0 {
+		return errKesildi
+	}
+	return err
+}
+
+var errKesildi = errors.New("interrupted by a signal; the item in progress was written back first, nothing is lost. rerun")
+
+// ogeTasiAra: test hook, called between the delete and the rewrite (nil in production).
+var ogeTasiAra func()
+
+func ogeTasiIc(o ogeKaydi, deger string) error {
 	yol := keychainPath()
 	if err := kcSilYol(yol, o.svc, o.acct); err != nil {
 		return fmt.Errorf("could not delete the old item (nothing was changed): %w", err)
+	}
+	if ogeTasiAra != nil {
+		ogeTasiAra()
 	}
 	yaz := func() error {
 		return kcYazNitelikYol(yol, o.svc, o.acct, []byte(deger), o.etiket, o.tur, o.aciklama)
@@ -493,6 +519,22 @@ func cmdAcl(args []string) error {
 	return nil
 }
 
+// degerSaglam: encoding/json turns invalid UTF-8 into U+FFFD without a word, so
+// a backup value holding U+FFFD may not be what the vault held; writing it
+// would replace the original with the damaged copy. Names only, never values.
+func degerSaglam(acct, v string) error {
+	if !utf8.ValidString(v) || strings.ContainsRune(v, utf8.RuneError) {
+		return fmt.Errorf("%s", acct)
+	}
+	return nil
+}
+
+func bozukDegerHatasi(bozuk []string) error {
+	sort.Strings(bozuk)
+	return fmt.Errorf("%d value(s) in the backup hold invalid UTF-8 or U+FFFD (an export replaces undecodable bytes silently), "+
+		"so they cannot be moved faithfully; nothing was changed: %s", len(bozuk), strings.Join(bozuk, ", "))
+}
+
 // kasa acl devral <backup.age>: handover after an upgrade.
 //
 // macOS gives a keychain under ~/Library/Keychains/ partition lists. An item
@@ -509,6 +551,12 @@ func cmdAcl(args []string) error {
 // skipped, so a rerun after an interruption continues where it stopped. The
 // backup-password item goes last, written with the password that just opened
 // the backup.
+//
+// The loop runs over the vault's listing, and an item deleted but not yet
+// written back (a kill inside the window) is not in the listing any more; so
+// after the loop every key of the backup that the vault lacks is written again
+// (and named). Before anything is touched, every item of the vault must be in
+// the backup and every value must survive the JSON round trip.
 func aclDevral(dosya string) error {
 	if err := requireHuman("acl", "devral"); err != nil {
 		return err
@@ -519,25 +567,76 @@ func aclDevral(dosya string) error {
 	if err := kilitKapisi(); err != nil {
 		return err
 	}
-	enc, err := os.ReadFile(expandHome(dosya))
+	b, parola, err := yedekAc(dosya)
 	if err != nil {
 		return err
+	}
+	err = devralYap(b, parola)
+	if err != nil {
+		audit("FAIL", "acl", "devral", err.Error())
+		return err
+	}
+	audit("OK", "acl", "devral", "")
+	return nil
+}
+
+// yedekAc: reads the encrypted export and opens it with the backup password typed on the terminal.
+func yedekAc(dosya string) (bundle, string, error) {
+	var b bundle
+	enc, err := os.ReadFile(expandHome(dosya))
+	if err != nil {
+		return b, "", err
 	}
 	parola, err := promptSecret("backup password: ")
 	if err != nil {
-		return err
+		return b, "", err
 	}
 	plain, err := openBundle(enc, parola)
 	if err != nil {
-		return err
+		return b, "", err
 	}
-	var b bundle
 	if err := json.Unmarshal(plain, &b); err != nil {
-		return fmt.Errorf("backup is corrupt: %w", err)
+		return b, "", fmt.Errorf("backup is corrupt: %w", err)
 	}
+	return b, parola, nil
+}
+
+func devralYap(b bundle, parola string) error {
 	ogeler, err := kcOgeler()
 	if err != nil {
 		return err
+	}
+	var eksik, bozuk []string
+	var yp []ogeKaydi
+	vardir := map[string]bool{}
+	for _, o := range ogeler {
+		if o.svc == yedekParolaService && o.acct == yedekParolaAccount {
+			yp = append(yp, o)
+			continue
+		}
+		if o.svc != service {
+			continue
+		}
+		vardir[o.acct] = true
+		v, ok := b.Secrets[o.acct]
+		if !ok {
+			eksik = append(eksik, o.acct)
+		} else if degerSaglam(o.acct, v) != nil {
+			bozuk = append(bozuk, o.acct)
+		}
+	}
+	for k, v := range b.Secrets {
+		if !vardir[k] && degerSaglam(k, v) != nil {
+			bozuk = append(bozuk, k)
+		}
+	}
+	if len(eksik) > 0 {
+		sort.Strings(eksik)
+		return fmt.Errorf("%d item(s) of the vault are not in the backup, nothing was changed: %s\n"+
+			"  export again with the old kasa and rerun", len(eksik), strings.Join(eksik, ", "))
+	}
+	if len(bozuk) > 0 {
+		return bozukDegerHatasi(bozuk)
 	}
 	yol := keychainPath()
 	tasi := func(o ogeKaydi, deger string) (bool, error) {
@@ -549,25 +648,13 @@ func aclDevral(dosya string) error {
 		}
 		return true, nil
 	}
-	var yp []ogeKaydi
-	var eksik []string
 	tasinan, ayni := 0, 0
 	for _, o := range ogeler {
-		if o.svc == yedekParolaService && o.acct == yedekParolaAccount {
-			yp = append(yp, o)
-			continue
-		}
 		if o.svc != service {
 			continue
 		}
-		v, ok := b.Secrets[o.acct]
-		if !ok {
-			eksik = append(eksik, o.acct)
-			continue
-		}
-		t, err := tasi(o, v)
+		t, err := tasi(o, b.Secrets[o.acct])
 		if err != nil {
-			audit("FAIL", "acl", "devral", err.Error())
 			return err
 		}
 		if t {
@@ -576,10 +663,22 @@ func aclDevral(dosya string) error {
 			ayni++
 		}
 	}
+	var geri []string
+	for k, v := range b.Secrets {
+		if vardir[k] {
+			continue
+		}
+		if err := kcYazYol(yol, service, k, []byte(v), "kasa secret", "managed by kasa"); err != nil {
+			return fmt.Errorf("%s: %w", k, err)
+		}
+		if got, err := kcOkuYol(yol, service, k); err != nil || got != v {
+			return fmt.Errorf("%s: read-back differs after writing it back from the backup; rerun", k)
+		}
+		geri = append(geri, k)
+	}
 	for _, o := range yp {
 		t, err := tasi(o, parola)
 		if err != nil {
-			audit("FAIL", "acl", "devral", err.Error())
 			return err
 		}
 		if t {
@@ -589,14 +688,133 @@ func aclDevral(dosya string) error {
 		}
 	}
 	fmt.Printf("handover: %d moved, %d already readable by this kasa\n", tasinan, ayni)
+	if len(geri) > 0 {
+		sort.Strings(geri)
+		fmt.Printf("written back from the backup (they were not in the vault, e.g. a run killed between delete and write; delete again if you removed them on purpose): %s\n", strings.Join(geri, ", "))
+	}
+	if len(yp) == 0 {
+		fmt.Println("note: the vault has no backup-password item; if there should be one: kasa backup-password set")
+	}
+	return nil
+}
+
+// tasiBayatMi: the export must be newer than the last change of the old vault
+// file, else items changed or added since would be lost. Compared in whole
+// seconds (the export stamps seconds).
+func tasiBayatMi(b bundle, eski string) error {
+	olusturuldu, err := time.Parse(time.RFC3339, b.Olusturuldu)
+	if err != nil {
+		return fmt.Errorf("the backup carries no readable creation time (%q); export again with the old kasa", b.Olusturuldu)
+	}
+	st, err := os.Stat(eski)
+	if err != nil {
+		return err
+	}
+	if st.ModTime().Truncate(time.Second).After(olusturuldu) {
+		return fmt.Errorf("the backup is stale: the old vault changed (%s) after it was exported (%s); "+
+			"export again with the old kasa and rerun", st.ModTime().Format(time.RFC3339), b.Olusturuldu)
+	}
+	return nil
+}
+
+// tasiHazirla: every check, before the new vault is created or anything is written.
+// normal: the old vault's kasa items; yp: the backup-password item; atlanan:
+// everything else (named for the user, it stays only in the old file).
+func tasiHazirla(b bundle, eski string) (normal, yp, atlanan []ogeKaydi, err error) {
+	ogeler, err := kcOgelerYol(eski)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var eksik, bozuk []string
+	for _, o := range ogeler {
+		switch {
+		case o.svc == yedekParolaService && o.acct == yedekParolaAccount:
+			yp = append(yp, o)
+		case o.svc == service:
+			v, ok := b.Secrets[o.acct]
+			if !ok {
+				eksik = append(eksik, o.acct)
+			} else if degerSaglam(o.acct, v) != nil {
+				bozuk = append(bozuk, o.acct)
+			}
+			normal = append(normal, o)
+		default:
+			atlanan = append(atlanan, o)
+		}
+	}
 	if len(eksik) > 0 {
 		sort.Strings(eksik)
-		audit("FAIL", "acl", "devral", "not in the backup: "+strings.Join(eksik, ","))
-		return fmt.Errorf("%d item(s) are not in the backup and were left as they are (this kasa cannot read them): %s\n"+
-			"  export again with the old kasa and rerun", len(eksik), strings.Join(eksik, ", "))
+		return nil, nil, nil, fmt.Errorf("%d item(s) of the old vault are not in the backup, nothing was changed: %s\n"+
+			"  export again with the old kasa (`kasa export <file>`) and rerun", len(eksik), strings.Join(eksik, ", "))
 	}
-	audit("OK", "acl", "devral", "")
-	return nil
+	if len(bozuk) > 0 {
+		return nil, nil, nil, bozukDegerHatasi(bozuk)
+	}
+	return normal, yp, atlanan, nil
+}
+
+// testTasiDur: set ONLY by tests (-ldflags -X): "N" stops tasiYap with an error
+// after N items were written, the state a kill would leave.
+var testTasiDur string
+
+// tasiYap: writes every item into the (existing, unlocked) new vault, checks
+// that each one is in the new vault's listing, and only then renames the old
+// file. Equal items are skipped, so a rerun after an interruption continues.
+func tasiYap(b bundle, parola, eski string, normal, yp []ogeKaydi) (yazilan, ayni int, son string, err error) {
+	yol := keychainPath()
+	dur, _ := strconv.Atoi(testTasiDur)
+	yaz := func(o ogeKaydi, deger string) error {
+		if v, err := kcOkuYol(yol, o.svc, o.acct); err == nil && v == deger {
+			ayni++
+			return nil
+		}
+		if err := kcYazNitelikYol(yol, o.svc, o.acct, []byte(deger), o.etiket, o.tur, o.aciklama); err != nil {
+			return fmt.Errorf("%s: %w", o.ad(), err)
+		}
+		if got, err := kcOkuYol(yol, o.svc, o.acct); err != nil || got != deger {
+			return fmt.Errorf("%s: read-back differs; the old vault is untouched, rerun", o.ad())
+		}
+		yazilan++
+		if dur > 0 && yazilan >= dur {
+			return fmt.Errorf("stopped by the test hook after %d items", yazilan)
+		}
+		return nil
+	}
+	for _, o := range normal {
+		if err := yaz(o, b.Secrets[o.acct]); err != nil {
+			return yazilan, ayni, "", err
+		}
+	}
+	for _, o := range yp {
+		if err := yaz(o, parola); err != nil {
+			return yazilan, ayni, "", err
+		}
+	}
+	yeni, err := kcOgelerYol(yol)
+	if err != nil {
+		return yazilan, ayni, "", err
+	}
+	var dest = map[[2]string]bool{}
+	for _, o := range yeni {
+		dest[[2]string{o.svc, o.acct}] = true
+	}
+	var yok []string
+	for _, o := range append(append([]ogeKaydi{}, normal...), yp...) {
+		if !dest[[2]string{o.svc, o.acct}] {
+			yok = append(yok, o.ad())
+		}
+	}
+	if len(yok) > 0 {
+		return yazilan, ayni, "", fmt.Errorf("%d item(s) of the old vault are not in the new vault's listing; the old vault is untouched, rerun: %s", len(yok), strings.Join(yok, ", "))
+	}
+	son = eski + ".eski"
+	if _, err := os.Stat(son); err == nil {
+		son = eski + time.Now().Format(".20060102-150405.eski")
+	}
+	if err := os.Rename(eski, son); err != nil {
+		return yazilan, ayni, "", fmt.Errorf("items are in the new vault but the old file could not be renamed: %w", err)
+	}
+	return yazilan, ayni, son, nil
 }
 
 // kasa acl tasi <backup.age>: move the vault from ~/Library/Keychains (up to
@@ -608,8 +826,11 @@ func aclDevral(dosya string) error {
 // encrypted backup (`kasa export <file>`), this kasa opens it with the backup
 // password and writes every item the old vault lists, with its attributes,
 // reading each back. Only when all of them are in the new vault is the old
-// file renamed to <name>.eski (never deleted). A rerun continues where an
-// interruption stopped: the new vault is reused and equal items are skipped.
+// file renamed to <name>.eski (never deleted); while the old file is still
+// there the move counts as UNFINISHED (requireKasa, status, acl yokla). A
+// rerun continues where an interruption stopped: the new vault is reused and
+// equal items are skipped. A backup older than the last change of the old
+// vault is refused.
 func aclTasi(dosya string) error {
 	if err := requireHuman("acl", "tasi"); err != nil {
 		return err
@@ -618,44 +839,16 @@ func aclTasi(dosya string) error {
 	if eski == "" {
 		return fmt.Errorf("no old vault to move (nothing at %s)", eskiKeychainYolu())
 	}
-	enc, err := os.ReadFile(expandHome(dosya))
+	b, parola, err := yedekAc(dosya)
 	if err != nil {
 		return err
 	}
-	parola, err := promptSecret("backup password: ")
-	if err != nil {
+	if err := tasiBayatMi(b, eski); err != nil {
 		return err
 	}
-	plain, err := openBundle(enc, parola)
+	normal, yp, atlanan, err := tasiHazirla(b, eski)
 	if err != nil {
 		return err
-	}
-	var b bundle
-	if err := json.Unmarshal(plain, &b); err != nil {
-		return fmt.Errorf("backup is corrupt: %w", err)
-	}
-	ogeler, err := kcOgelerYol(eski)
-	if err != nil {
-		return err
-	}
-	// Check everything before creating anything: an item the backup lacks would be lost.
-	var yp, normal []ogeKaydi
-	var eksik []string
-	for _, o := range ogeler {
-		switch {
-		case o.svc == yedekParolaService && o.acct == yedekParolaAccount:
-			yp = append(yp, o)
-		case o.svc == service:
-			if _, ok := b.Secrets[o.acct]; !ok {
-				eksik = append(eksik, o.acct)
-			}
-			normal = append(normal, o)
-		}
-	}
-	if len(eksik) > 0 {
-		sort.Strings(eksik)
-		return fmt.Errorf("%d item(s) of the old vault are not in the backup, nothing was changed: %s\n"+
-			"  export again with the old kasa (`kasa export <file>`) and rerun", len(eksik), strings.Join(eksik, ", "))
 	}
 	if !keychainExists() {
 		p, err := yeniMasterParola()
@@ -668,51 +861,21 @@ func aclTasi(dosya string) error {
 	} else if err := kilitKapisi(); err != nil {
 		return err
 	}
-	yol := keychainPath()
-	yaz := func(o ogeKaydi, deger string) (bool, error) {
-		if v, err := kcOkuYol(yol, o.svc, o.acct); err == nil && v == deger {
-			return false, nil
-		}
-		if err := kcYazNitelikYol(yol, o.svc, o.acct, []byte(deger), o.etiket, o.tur, o.aciklama); err != nil {
-			return false, fmt.Errorf("%s: %w", o.ad(), err)
-		}
-		if got, err := kcOkuYol(yol, o.svc, o.acct); err != nil || got != deger {
-			return false, fmt.Errorf("%s: read-back differs; the old vault is untouched, rerun", o.ad())
-		}
-		return true, nil
+	yazilan, ayni, son, err := tasiYap(b, parola, eski, normal, yp)
+	if err != nil {
+		audit("FAIL", "acl", "tasi", err.Error())
+		return err
 	}
-	yazilan, ayni := 0, 0
-	say := func(t bool) {
-		if t {
-			yazilan++
-		} else {
-			ayni++
+	fmt.Printf("moved: %d written, %d already there; all %d items of the old vault are in %s\n",
+		yazilan, ayni, len(normal)+len(yp), keychainPath())
+	if len(atlanan) > 0 {
+		fmt.Printf("NOT moved (not kasa secrets; they stay only in the old file %s):\n", son)
+		for _, o := range atlanan {
+			fmt.Println("  " + o.ad())
 		}
 	}
-	for _, o := range normal {
-		t, err := yaz(o, b.Secrets[o.acct])
-		if err != nil {
-			audit("FAIL", "acl", "tasi", err.Error())
-			return err
-		}
-		say(t)
-	}
-	for _, o := range yp {
-		t, err := yaz(o, parola)
-		if err != nil {
-			audit("FAIL", "acl", "tasi", err.Error())
-			return err
-		}
-		say(t)
-	}
-	son := eski + ".eski"
-	if _, err := os.Stat(son); err == nil {
-		son = eski + time.Now().Format(".20060102-150405.eski")
-	}
-	if err := os.Rename(eski, son); err != nil {
-		return fmt.Errorf("items are in the new vault but the old file could not be renamed: %w", err)
-	}
-	fmt.Printf("moved: %d written, %d already there -> %s\nold vault kept as %s (delete it yourself after checking: kasa export)\n", yazilan, ayni, yol, son)
+	fmt.Printf("old vault kept as %s\nonce `kasa export` works, delete the old vault and the encrypted backup yourself: rm -P %s %s\n",
+		son, expandHome(dosya), son)
 	audit("OK", "acl", "tasi", "")
 	return nil
 }
@@ -720,12 +883,17 @@ func aclTasi(dosya string) error {
 // kasa acl yokla: can THIS kasa read an item of the vault it uses? Prints one
 // line (no value) and exits with: 0 readable, or not testable (no vault /
 // locked / no item: stated, not an error); 1 unreadable (-25293: another build
-// wrote the items, handover: acl devral); 2 the vault is still at its old
-// place (acl tasi); 3 some other error. `make install` uses it as its gate:
-// the question is "can the new binary read", not "is it the same binary".
+// wrote the items, handover: acl devral); 2 the vault is at its old place or
+// the move to the new place is unfinished (acl tasi); 3 some other error.
+// `make install` uses it as its gate: the question is "can the new binary
+// read", not "is it the same binary".
 func aclYokla() int {
-	if !keychainExists() && eskiKasaYolu() != "" {
-		fmt.Println("old-place: the vault is still at " + eskiKasaYolu())
+	if e := eskiKasaYolu(); e != "" {
+		if keychainExists() {
+			fmt.Println("move-unfinished: the new vault holds only part of the items; the old vault is still at " + e)
+		} else {
+			fmt.Println("old-place: the vault is still at " + e)
+		}
 		return 2
 	}
 	if !keychainExists() {

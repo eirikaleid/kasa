@@ -152,6 +152,10 @@ func cmdExport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("could not read %s: %w", k, err)
 		}
+		if !utf8.ValidString(v) {
+			// json would store U+FFFD in its place: a backup that restores a different value.
+			return fmt.Errorf("%s holds a value that is not valid UTF-8; a JSON backup cannot keep it exactly, export aborted", k)
+		}
 		b.Secrets[k] = v
 	}
 	b.Profiles = c.Profiles

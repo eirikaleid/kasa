@@ -68,9 +68,13 @@ cert-hazir:
 # (another build wrote the items: macOS partition list) or the vault still at its
 # old place (up to 2.5.x): the encrypted backup of the installed kasa
 # (`kasa export <file>`) is needed, DEVIR_YEDEK=<file>. The new kasa moves/rewrites
-# the items first, then the binary is replaced; on failure the old kasa stays.
+# the items first, then the binary is replaced. The new binary is copied next to
+# the old one BEFORE the gate (a full disk or a read-only BINDIR must not surface
+# after the items were moved); on any failure kasa.new is removed, the old kasa stays.
 install: build
-	@./kasa acl yokla; rc=$$?; \
+	mkdir -p "$(BINDIR)"
+	cp kasa "$(BINDIR)/kasa.new"
+	@( ./kasa acl yokla; rc=$$?; \
 	if [ $$rc -ne 0 ] && [ "$(DEVIR_ATLA)" != "1" ]; then \
 		if [ $$rc -ne 1 ] && [ $$rc -ne 2 ]; then echo "error: cannot tell whether this build reads the vault (see above)" >&2; exit 1; fi; \
 		if [ -z "$(DEVIR_YEDEK)" ]; then \
@@ -82,9 +86,8 @@ install: build
 			exit 1; \
 		fi; \
 		if [ $$rc -eq 2 ]; then ./kasa acl tasi "$(DEVIR_YEDEK)" || exit 1; else ./kasa acl devral "$(DEVIR_YEDEK)" || exit 1; fi; \
-	fi
-	mkdir -p "$(BINDIR)"
-	cp kasa "$(BINDIR)/kasa.new" && mv -f "$(BINDIR)/kasa.new" "$(BINDIR)/kasa"
+	fi ) || { rm -f "$(BINDIR)/kasa.new"; exit 1; }
+	mv -f "$(BINDIR)/kasa.new" "$(BINDIR)/kasa"
 	@echo "installed: $(BINDIR)/kasa"
 
 test:

@@ -59,6 +59,22 @@ func eskiKasaYolu() string {
 	return e
 }
 
+// tasiYarim: the new vault exists and the old file is still there, i.e. `acl
+// tasi` started and did not finish (it renames the old file only after every
+// item is in the new vault). The new vault then holds only part of the items.
+func tasiYarim() string {
+	if keychainExists() {
+		return eskiKasaYolu()
+	}
+	return ""
+}
+
+func tasiYarimHatasi(eski string) error {
+	return fmt.Errorf("the move from the old place is UNFINISHED: the new vault (%s) holds only part of the items, the old vault is still at %s.\n"+
+		"  finish it (human only): export again with the INSTALLED kasa (`kasa export <file>`), then `make install DEVIR_YEDEK=<file>` or `kasa acl tasi <file>` (it continues where it stopped)",
+		keychainPath(), eski)
+}
+
 // vaultYok: the "no vault" error; names the old place when the vault is still there.
 func vaultYok(yeniyse string) error {
 	if e := eskiKasaYolu(); e != "" {
@@ -84,6 +100,9 @@ func keychainExists() bool {
 // UP looked like "that key does not exist". For add the result was worse: the
 // write failed, yet the user believed the secret had been saved.
 func requireKasa() error {
+	if e := tasiYarim(); e != "" {
+		return tasiYarimHatasi(e)
+	}
 	if !keychainExists() {
 		return vaultYok(fmt.Sprintf("vault is not set up (%s does not exist). first run: kasa init", keychainPath()))
 	}
@@ -286,35 +305,19 @@ func kcList() ([]string, error) {
 	if err := kilitKapisi(); err != nil {
 		return nil, err
 	}
-	out, err := sec("dump-keychain", keychainPath())
+	// Through kcOgelerYol: it decodes the `0x<hex>  "..."` form dump-keychain
+	// uses for an account with non-ASCII characters; the old line parser here
+	// skipped such items, so export and the key list dropped them.
+	ogeler, err := kcOgelerYol(keychainPath())
 	if err != nil {
 		return nil, err
 	}
 	var keys []string
-	lines := strings.Split(out, "\n")
-	svcOK := false
-	acct := ""
-	flush := func() {
-		if svcOK && acct != "" {
-			keys = append(keys, acct)
-		}
-		svcOK, acct = false, ""
-	}
-	for _, l := range lines {
-		if strings.HasPrefix(l, "keychain:") {
-			flush()
-		}
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "\"svce\"") && strings.Contains(t, "\""+service+"\"") {
-			svcOK = true
-		}
-		if strings.HasPrefix(t, "\"acct\"") {
-			if i := strings.Index(t, "=\""); i >= 0 {
-				acct = strings.Trim(t[i+1:], "\"")
-			}
+	for _, o := range ogeler {
+		if o.svc == service && o.acct != "" {
+			keys = append(keys, o.acct)
 		}
 	}
-	flush()
 	sort.Strings(keys)
 	return uniq(keys), nil
 }

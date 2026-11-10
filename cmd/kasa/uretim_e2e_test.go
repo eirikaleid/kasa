@@ -49,9 +49,9 @@ func e2eKaynak(t *testing.T, surum string) string {
 
 // e2eMakeBuild: `make build` in src, signed with the certificate, with the
 // vault path and kasa's home pointed at the test directories.
-func e2eMakeBuild(t *testing.T, src, out, sha1, kc, vault, ev string) {
+func e2eMakeBuild(t *testing.T, src, out, sha1, kc, vault, ev string, ekLd ...string) {
 	t.Helper()
-	ld := "LDFLAGS=-s -w -X 'main.testKeychainYolu=" + vault + "' -X 'main.testEvDizini=" + ev + "'"
+	ld := "LDFLAGS=-s -w -X 'main.testKeychainYolu=" + vault + "' -X 'main.testEvDizini=" + ev + "'" + strings.Join(ekLd, "")
 	if o, err := komutKos(t, src, nil, "make", "build", "OUT="+out, "SIGN_IDENTITY="+sha1, "SIGN_KEYCHAIN="+kc, ld); err != nil {
 		t.Fatalf("make build: %v\n%s", err, o)
 	}
@@ -196,6 +196,9 @@ func TestUretimYukseltmeDevri(t *testing.T) {
 	if b, _ := os.ReadFile(kasa); string(b) != string(eskiBayt) {
 		t.Fatal("the refused install replaced the old kasa")
 	}
+	if _, err := os.Stat(kasa + ".new"); err == nil {
+		t.Fatal("the refused install left kasa.new behind")
+	}
 	yedek := filepath.Join(t.TempDir(), "devir.age")
 	if out, err := e2eInsan(t, "", "", kasa, "export", yedek); err != nil {
 		t.Fatalf("old kasa export: %v\n%s", err, out)
@@ -229,8 +232,14 @@ func TestUretimYukseltmeDevri(t *testing.T) {
 // ekstra[0] is one more make argument, the rest is typed in.
 func e2eKur(t *testing.T, src, bindir, sha1, kc1, vault, ev string, ekstra ...string) (string, error) {
 	t.Helper()
+	return e2eKurLd(t, "", src, bindir, sha1, kc1, vault, ev, ekstra...)
+}
+
+// e2eKurLd: e2eKur with more link flags (test hooks), e.g. " -X 'main.testTasiDur=2'".
+func e2eKurLd(t *testing.T, ekLd, src, bindir, sha1, kc1, vault, ev string, ekstra ...string) (string, error) {
+	t.Helper()
 	args := []string{"make", "install", "BINDIR=" + bindir, "SIGN_IDENTITY=" + sha1, "SIGN_KEYCHAIN=" + kc1,
-		"LDFLAGS=-s -w -X 'main.testKeychainYolu=" + vault + "' -X 'main.testEvDizini=" + ev + "'"}
+		"LDFLAGS=-s -w -X 'main.testKeychainYolu=" + vault + "' -X 'main.testEvDizini=" + ev + "'" + ekLd}
 	return e2eInsan(t, src, strings.Join(ekstra[1:], ""), append(args, ekstra[0])...)
 }
 
@@ -350,6 +359,9 @@ func TestUretimYerDegisimi(t *testing.T) {
 	if b, _ := os.ReadFile(kasa); string(b) != string(eskiBayt) {
 		t.Fatal("the refused install replaced the old kasa")
 	}
+	if _, err := os.Stat(kasa + ".new"); err == nil {
+		t.Fatal("the refused install left kasa.new behind")
+	}
 	yedek := filepath.Join(t.TempDir(), "devir.age")
 	if out, err := e2eInsan(t, "", "", kasa, "export", yedek); err != nil {
 		t.Fatalf("old kasa export: %v\n%s", err, out)
@@ -381,5 +393,95 @@ func TestUretimYerDegisimi(t *testing.T) {
 	}
 	if out, err := e2eInsan(t, "", "", kasa, "export", filepath.Join(t.TempDir(), "uc.age")); err != nil {
 		t.Fatalf("the rebuilt kasa cannot export: %v\n%s", err, out)
+	}
+}
+
+// TestUretimTasiYarim: the move from the old place is cut off in the middle
+// (the test hook stops `acl tasi` after 2 of 4 writes; a kill leaves the same
+// state). The old file is still there, so every command of the new kasa says
+// the move is UNFINISHED, `acl yokla` answers 2, the refused install leaves no
+// kasa.new and the old kasa in place; `make install DEVIR_YEDEK=` again reuses
+// the new vault, writes the rest and only then keeps the old file as .eski.
+func TestUretimTasiYarim(t *testing.T) {
+	kc1, kcp1 := e2eAnahtarlik(t, "cert1")
+	sha1, _, _ := e2eSertifika(t, kc1, kcp1)
+	srcA, srcB := e2eKaynak(t, ""), e2eKaynak(t, "9.9.9-rebuild")
+	ev := kanonikTemp(t)
+	eskiYol := filepath.Join(ev, "Library", "Keychains", "kasa.keychain-db")
+	yeniYol := filepath.Join(ev, "Library", "Application Support", "kasa", "kasa.keychain-db")
+	e2eUretimOrtami(t, eskiYol, ev, "e2e/a", "e2e/b", "e2e/c")
+	t.Cleanup(func() { kcKeychainSilYol(yeniYol) })
+	bindir := filepath.Join(t.TempDir(), "bin")
+	if out, err := e2eKur(t, srcA, bindir, sha1, kc1, eskiYol, ev, "DEVIR_ATLA=1"); err != nil {
+		t.Fatalf("installing the old kasa: %v\n%s", err, out)
+	}
+	kasa := filepath.Join(bindir, "kasa")
+	for _, k := range []string{"e2e/a", "e2e/b", "e2e/c"} {
+		if out, err := e2eKasa(t, kasa, "değer-"+k, "add", k, "--stdin"); err != nil {
+			t.Fatalf("old kasa add: %v\n%s", err, out)
+		}
+	}
+	const yp, master = "Backup.Pass-2026", "Master.Pass-2026"
+	if out, err := e2eInsan(t, "", yp+"\n"+yp+"\n", kasa, "backup-password", "set"); err != nil {
+		t.Fatalf("backup-password set: %v\n%s", err, out)
+	}
+	eskiBayt, _ := os.ReadFile(kasa)
+	yedek := filepath.Join(t.TempDir(), "devir.age")
+	if out, err := e2eInsan(t, "", "", kasa, "export", yedek); err != nil {
+		t.Fatalf("old kasa export: %v\n%s", err, out)
+	}
+
+	const kes = " -X 'main.testTasiDur=2'"
+	out, err := e2eKurLd(t, kes, srcB, bindir, sha1, kc1, yeniYol, ev, "DEVIR_YEDEK="+yedek, yp+"\n"+master+"\n"+master+"\n")
+	if err == nil || !strings.Contains(out, "stopped by the test hook") {
+		t.Fatalf("the first move should have been cut off: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(kasa); string(b) != string(eskiBayt) {
+		t.Fatal("the failed install replaced the old kasa")
+	}
+	if _, err := os.Stat(kasa + ".new"); err == nil {
+		t.Fatal("the failed install left kasa.new behind")
+	}
+	if _, err := os.Stat(eskiYol); err != nil {
+		t.Fatalf("the old vault must stay while the move is unfinished: %v", err)
+	}
+	if _, err := os.Stat(eskiYol + ".eski"); err == nil {
+		t.Fatal(".eski exists although the move is unfinished")
+	}
+
+	yeni := filepath.Join(t.TempDir(), "kasa-new")
+	e2eMakeBuild(t, srcB, yeni, sha1, kc1, yeniYol, ev)
+	if out, err := e2eKasa(t, yeni, "", "run", "p", "--", "/usr/bin/true"); err == nil || !strings.Contains(out, "UNFINISHED") {
+		t.Fatalf("run must say the move is unfinished: %v\n%s", err, out)
+	}
+	if out, _ := e2eKasa(t, yeni, "", "status"); !strings.Contains(out, "UNFINISHED") {
+		t.Fatalf("status must say the move is unfinished:\n%s", out)
+	}
+	if out, err := e2eKasa(t, yeni, "", "acl", "yokla"); err == nil || !strings.Contains(out, "move-unfinished") {
+		t.Fatalf("acl yokla must answer 2 (move-unfinished): %v\n%s", err, out)
+	}
+
+	// The rerun: same command as the first time, no hook; the new vault exists.
+	out, err = e2eKur(t, srcB, bindir, sha1, kc1, yeniYol, ev, "DEVIR_YEDEK="+yedek, yp+"\n")
+	if err != nil || !strings.Contains(out, "2 written, 2 already there") {
+		t.Fatalf("the rerun must write the remaining items: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(eskiYol); err == nil {
+		t.Fatal("the old vault file is still in place after a complete move")
+	}
+	if _, err := os.Stat(eskiYol + ".eski"); err != nil {
+		t.Fatalf("the old vault was not kept as .eski: %v", err)
+	}
+	if _, err := os.Stat(kasa + ".new"); err == nil {
+		t.Fatal("kasa.new left behind after a successful install")
+	}
+	if out, err := e2eKasa(t, kasa, "", "run", "p", "--", "/usr/bin/true"); err != nil {
+		t.Fatalf("the new kasa cannot read the moved items: %v\n%s", err, out)
+	}
+	if out, err := e2eInsan(t, "", "", kasa, "export", filepath.Join(t.TempDir(), "yeni.age")); err != nil {
+		t.Fatalf("the new kasa cannot export: %v\n%s", err, out)
+	}
+	if out, err := e2eKasa(t, kasa, "", "acl", "yokla"); err != nil {
+		t.Fatalf("acl yokla after a complete move: %v\n%s", err, out)
 	}
 }

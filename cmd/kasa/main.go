@@ -305,6 +305,10 @@ func cmdStatus() error {
 		fmt.Println("state     : not set up (kasa init)")
 		return nil
 	}
+	if e := tasiYarim(); e != "" {
+		fmt.Println("state     : the move from the old place is UNFINISHED; the old vault is still at " + e + " (kasa acl tasi <backup.age>, README: Upgrading)")
+		return nil
+	}
 	locked := isLocked()
 	if locked {
 		fmt.Println("state     : LOCKED (kasa unlock)")
