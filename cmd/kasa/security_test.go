@@ -295,7 +295,7 @@ func TestAjanKapilari(t *testing.T) {
 		t.Error("KASA_SOR=1 opened a dialog in an agent environment")
 	}
 
-	c := &Config{Hedefler: []string{t.TempDir()}}
+	c := &Config{kilitliHedefler: []string{t.TempDir()}}
 	for _, f := range []map[string]string{{"hedef": d}, {"target": d}, {"out": d}, {"cikti": d}} {
 		if _, err := exportYollari(nil, f, c, false); err == nil {
 			t.Errorf("agent was able to give a custom path: %v", f)

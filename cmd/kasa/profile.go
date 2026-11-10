@@ -39,6 +39,10 @@ type Config struct {
 	// a file the agent can write, including a fake file made by changing HOME)
 	// cannot access them.
 	kilitliRef map[string]bool
+	// kilitliHedefler: export targets from the locked file. Only these are
+	// used; Hedefler (user file, agent-writable) is kept only so saveConfig
+	// does not drop it, and is ignored (targets.go).
+	kilitliHedefler []string
 }
 
 // KilitliProfilYolu: root-owned profile file.
@@ -90,12 +94,14 @@ func kilitliUygula(c *Config, yol string) error {
 	}
 	var k struct {
 		Profiles map[string]Profile `json:"profiles"`
+		Hedefler []string           `json:"hedefler"`
 	}
 	if err := json.Unmarshal(b, &k); err != nil {
 		return fmt.Errorf("%s is corrupt: %w", yol, err)
 	}
 	c.kullaniciAsli = map[string]*Profile{}
 	c.kilitliRef = map[string]bool{}
+	c.kilitliHedefler = k.Hedefler
 	for ad, p := range k.Profiles {
 		if err := kilitliAllowDenetle(p.Allow); err != nil {
 			return fmt.Errorf("%s: profile %s: %w", yol, ad, err)
@@ -199,6 +205,12 @@ func saveConfig(c *Config) error {
 		return err
 	}
 	return os.WriteFile(configPath(), append(b, '\n'), 0o600)
+}
+
+// kilitliMi: does the profile come from the root-owned locked file?
+func (c *Config) kilitliMi(name string) bool {
+	_, k := c.kullaniciAsli[name]
+	return k
 }
 
 func (c *Config) get(name string) (Profile, error) {

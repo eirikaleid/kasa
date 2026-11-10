@@ -23,7 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.3.1"
+const version = "2.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -461,11 +461,15 @@ func cmdRun(args []string) error {
 		audit("DENIED", "run", name, "not found: "+filepath.Base(cmdline[0]))
 		return err
 	}
-	ok, eslesen, neden := izinVer(p.Allow, bin, cmdline[1:], homeDir())
+	kilitli := c.kilitliMi(name)
+	ok, eslesen, neden, args1 := izinVerKilit(p.Allow, bin, cmdline[1:], homeDir(), kilitli)
 	if !ok {
 		audit("DENIED", "run", name, "command not allowed: "+bin)
 		return fmt.Errorf("%s", neden)
 	}
+	// Locked: pinned path arguments go to the child as the resolved paths that
+	// were checked, not the caller's (possibly symlinked) spelling.
+	cmdline = append(cmdline[:1:1], args1...)
 
 	if p.Ortam != nil {
 		if err := ortamGecerli(*p.Ortam); err != nil {
@@ -482,7 +486,7 @@ func cmdRun(args []string) error {
 	if len(atilan) > 0 {
 		audit("NOTE", "run", name, "dropped from environment: "+strings.Join(atilan, ","))
 	}
-	full = sabitliOrtam(full, eslesen)
+	full = sabitliOrtam(full, eslesen, kilitli)
 	// Only the matching allow entry is logged, never the argument values.
 	if riskliUyar(c, name, eslesen) {
 		audit("NOTE", "run", name, "risky allow entry: "+eslesen)
@@ -602,7 +606,7 @@ func cmdProfileTest(c *Config, args []string) error {
 		return fmt.Errorf("denied: %w", err)
 	}
 	fmt.Println("path   :", bin)
-	ok, eslesen, neden := izinVer(p.Allow, bin, cmdline[1:], homeDir())
+	ok, eslesen, neden, _ := izinVerKilit(p.Allow, bin, cmdline[1:], homeDir(), c.kilitliMi(args[0]))
 	if !ok {
 		audit("DENIED", "profile-test", args[0], "command not allowed: "+bin)
 		return fmt.Errorf("denied: %s", neden)

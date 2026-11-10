@@ -251,6 +251,7 @@ func exportYollari(args []string, f map[string]string, c *Config, overwrite bool
 		return []string{tekYol(expandHome(ozel), ad)}, nil
 	}
 
+	kullaniciHedefleriUyar(c)
 	hs := hedefler(c)
 	if len(hs) == 0 {
 		return nil, fmt.Errorf("no targets. add one first:\n" +

@@ -224,6 +224,11 @@ Keychain dosyası macOS'a özeldir ve hiçbir yere kopyalanmaz. Taşınabilir bi
 kasa target add /Volumes/Backup/kasa      # hedef sadece bir dizindir
 kasa target add ~/private-repo/backups
 kasa target ls
+# 2.4.0'dan beri hedefler yalnız root'a ait /usr/local/etc/kasa/profiles.json'da
+# ("hedefler"). `target add|rm` yalnız insan içindir; o dosyaya senin adına
+# yazamaz, çalıştıracağın tam `sudo /usr/bin/plutil ...` komutunu basar.
+# ~/.config/kasa/profiles.json'da kalan hedefler yok sayılır; uyarı göç
+# komutunu basar.
 
 kasa unlock
 kasa export                               # aynı şifreli blob her hedefe
@@ -234,7 +239,7 @@ Hedef; harici disk, NAS bağlantısı, bulut senkron klasörü ya da private bir
 
 **Yedek parolası.** `kasa backup-password set`, parolayı kasa keychain'inde ayrı bir servis altında saklar; böylece gözetimsiz export çalışır (örneğin [launchd](contrib/launchd/README.md) ile). Yeni parolalar en az 12 karakter olmalı ve dört karakter sınıfının hepsini içermelidir (büyük harf, küçük harf, rakam, noktalama). Parolayı ayarlamak ve silmek yalnızca insana açıktır; ajan kendi bildiği bir parolayı yerleştiremez. Mevcut yedeklerinizi açan parolayı girin; parolayı değiştirmek yalnızca yeni dosyaları etkiler.
 
-**Ajan notu.** Ajan ortamında `export` keyfi yollara değil, yalnızca yapılandırılmış hedeflere (`kasa target add`) yazar ve yalnızca yedek parolası zaten kayıtlıysa çalışır.
+**Ajan notu.** Ajan ortamında `export` keyfi yollara değil, yalnızca root'a ait kilitli dosyadaki hedeflere (ajan hedef ekleyemez) yazar ve yalnızca yedek parolası zaten kayıtlıysa çalışır.
 
 **Geri yükleme**, yeni makinede bu sırayla:
 

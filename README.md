@@ -224,6 +224,11 @@ The keychain file is macOS-specific and is never copied anywhere. The portable f
 kasa target add /Volumes/Backup/kasa      # a target is just a directory
 kasa target add ~/private-repo/backups
 kasa target ls
+# Since 2.4.0 targets live only in the root-owned /usr/local/etc/kasa/profiles.json
+# ("hedefler"). `target add|rm` is human-only; it cannot write that file as you,
+# so it prints the exact `sudo /usr/bin/plutil ...` command to run. Targets left
+# in ~/.config/kasa/profiles.json are ignored, with a warning that prints the
+# migration command.
 
 kasa unlock
 kasa export                               # same encrypted blob to every target
@@ -234,7 +239,7 @@ A target can be an external disk, a NAS mount, a cloud-sync folder or a director
 
 **Backup password.** `kasa backup-password set` stores the password in the kasa keychain under a separate service, so unattended exports work (for example from [launchd](contrib/launchd/README.md)). New passwords must be at least 12 characters and use all four character classes (upper, lower, digit, punctuation). Setting and removing the password is human-only, so an agent cannot plant a password it knows. Enter the password that opens your existing backups; changing it only affects new files.
 
-**Agent note.** In an agent environment `export` writes only to configured targets (`kasa target add`), not to arbitrary paths, and works only if the backup password is already stored.
+**Agent note.** In an agent environment `export` writes only to the targets in the root-owned locked file (an agent cannot add one), not to arbitrary paths, and works only if the backup password is already stored.
 
 **Restore** on a new machine, in this order:
 

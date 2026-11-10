@@ -25,7 +25,7 @@ func TestSabitliOrtam(t *testing.T) {
 	}
 	for _, d := range durumlar {
 		env, _ := cocukOrtami(cagiran, p, map[string]string{"TOKEN": "v"}, "/h")
-		env = sabitliOrtam(env, d.eslesen)
+		env = sabitliOrtam(env, d.eslesen, false)
 		sayi := 0
 		for _, e := range env {
 			if strings.HasPrefix(e, "PYTHONSAFEPATH=") {

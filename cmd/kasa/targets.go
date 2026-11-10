@@ -6,9 +6,11 @@ package main
 // abstraction, so no new code is needed for each cloud provider.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,10 +30,17 @@ func expandHome(p string) string {
 	return p
 }
 
-// hedefler: returns the configured targets as absolute paths.
+// hedefler: returns the configured targets as absolute paths. Only the
+// root-owned locked file counts: ~/.config/kasa/profiles.json is writable by
+// an agent, which could otherwise add a directory it reads and have the next
+// export (even one a human starts) write the whole encrypted vault there.
 func hedefler(c *Config) []string {
+	return mutlakHedefler(c.kilitliHedefler)
+}
+
+func mutlakHedefler(liste []string) []string {
 	var out []string
-	for _, h := range c.Hedefler {
+	for _, h := range liste {
 		if h = strings.TrimSpace(h); h != "" {
 			abs, err := filepath.Abs(expandHome(h))
 			if err != nil {
@@ -41,6 +50,103 @@ func hedefler(c *Config) []string {
 		}
 	}
 	return out
+}
+
+// kullaniciHedefleriUyar: targets left in the user file (before 2.4.0) are
+// ignored; say so on stderr, with the command that moves them.
+func kullaniciHedefleriUyar(c *Config) {
+	eski := mutlakHedefler(c.Hedefler)
+	if len(eski) == 0 {
+		return
+	}
+	hepsi := hedefler(c)
+	for _, h := range eski {
+		if !slices.Contains(hepsi, h) {
+			hepsi = append(hepsi, h)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "warning: backup targets in %s are ignored since 2.4.0 (an agent can write that file):\n", configPathYol())
+	for _, h := range eski {
+		fmt.Fprintln(os.Stderr, "  "+h)
+	}
+	fmt.Fprintf(os.Stderr, "  move them to the locked file, then remove \"hedefler\" from the user file:\n  %s\n", hedefSudoKomutu(KilitliProfilYolu, hepsi))
+}
+
+// kabukTirnak: single-quotes s for a POSIX shell.
+func kabukTirnak(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// hedefSudoKomutu: the command a human runs to set the target list in the
+// locked file. Only system tools, never the user-writable kasa binary as root.
+func hedefSudoKomutu(yol string, hs []string) string {
+	if hs == nil {
+		hs = []string{}
+	}
+	j, _ := json.Marshal(hs)
+	if _, err := os.Lstat(yol); os.IsNotExist(err) {
+		dosya, _ := json.Marshal(map[string]any{"profiles": map[string]any{}, "hedefler": hs})
+		return fmt.Sprintf("sudo /bin/mkdir -p %s && echo %s | sudo /usr/bin/tee %s >/dev/null",
+			kabukTirnak(filepath.Dir(yol)), kabukTirnak(string(dosya)), kabukTirnak(yol))
+	}
+	if len(hs) == 0 {
+		return fmt.Sprintf("sudo /usr/bin/plutil -remove hedefler %s", kabukTirnak(yol))
+	}
+	return fmt.Sprintf("sudo /usr/bin/plutil -replace hedefler -json %s %s", kabukTirnak(string(j)), kabukTirnak(yol))
+}
+
+// hedefYaz: sets "hedefler" in the locked file, keeping its other fields.
+// Works only for root; for anyone else it fails and the caller prints the
+// sudo command. The file stays 0644 so every user can read it.
+func hedefYaz(yol string, hs []string) error {
+	alanlar := map[string]json.RawMessage{}
+	if b, err := os.ReadFile(yol); err == nil {
+		if err := json.Unmarshal(b, &alanlar); err != nil {
+			return fmt.Errorf("%s is corrupt: %w", yol, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if _, var_ := alanlar["profiles"]; !var_ {
+		alanlar["profiles"] = json.RawMessage("{}")
+	}
+	if len(hs) == 0 {
+		delete(alanlar, "hedefler")
+	} else {
+		j, _ := json.Marshal(hs)
+		alanlar["hedefler"] = j
+	}
+	b, err := json.MarshalIndent(alanlar, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(yol), ".profiles-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), yol)
+}
+
+// hedefKaydet: writes the new locked list, or tells the human how to.
+func hedefKaydet(op, yol string, hs []string) error {
+	if err := hedefYaz(KilitliProfilYolu, hs); err != nil {
+		audit("FAIL", op, yol, "locked file not writable")
+		return fmt.Errorf("backup targets live in the root-owned %s and %s could not be written (%v).\n"+
+			"  run this yourself in a terminal:\n  %s", KilitliProfilYolu, KilitliProfilYolu, err, hedefSudoKomutu(KilitliProfilYolu, hs))
+	}
+	return nil
 }
 
 func cmdHedef(args []string) error {
@@ -55,6 +161,7 @@ func cmdHedef(args []string) error {
 
 	switch sub {
 	case "ls", "list":
+		kullaniciHedefleriUyar(c)
 		hs := hedefler(c)
 		if len(hs) == 0 {
 			fmt.Println("(no targets)")
@@ -81,6 +188,10 @@ func cmdHedef(args []string) error {
 		if err != nil {
 			return err
 		}
+		// A target decides where the whole encrypted vault is written.
+		if err := requireHuman("hedef.ekle", yol); err != nil {
+			return err
+		}
 		for _, h := range hedefler(c) {
 			if h == yol {
 				return fmt.Errorf("target already added: %s", yol)
@@ -89,8 +200,7 @@ func cmdHedef(args []string) error {
 		if err := os.MkdirAll(yol, 0o700); err != nil {
 			return fmt.Errorf("could not create directory: %w", err)
 		}
-		c.Hedefler = append(c.Hedefler, yol)
-		if err := saveConfig(c); err != nil {
+		if err := hedefKaydet("hedef.ekle", yol, append(hedefler(c), yol)); err != nil {
 			return err
 		}
 		audit("OK", "hedef.ekle", yol, "")
@@ -102,6 +212,25 @@ func cmdHedef(args []string) error {
 			return fmt.Errorf("usage: kasa target rm <dir>")
 		}
 		yol, _ := filepath.Abs(expandHome(args[1]))
+		if err := requireHuman("hedef.sil", yol); err != nil {
+			return err
+		}
+		// A leftover entry in the user file (before 2.4.0) is removed from there.
+		var eskiKalan []string
+		eskiVardi := false
+		for _, h := range mutlakHedefler(c.Hedefler) {
+			if h == yol {
+				eskiVardi = true
+				continue
+			}
+			eskiKalan = append(eskiKalan, h)
+		}
+		if eskiVardi {
+			c.Hedefler = eskiKalan
+			if err := saveConfig(c); err != nil {
+				return err
+			}
+		}
 		var kalan []string
 		bulundu := false
 		for _, h := range hedefler(c) {
@@ -111,12 +240,13 @@ func cmdHedef(args []string) error {
 			}
 			kalan = append(kalan, h)
 		}
-		if !bulundu {
+		if !bulundu && !eskiVardi {
 			return fmt.Errorf("no such target: %s (see: kasa target ls)", yol)
 		}
-		c.Hedefler = kalan
-		if err := saveConfig(c); err != nil {
-			return err
+		if bulundu {
+			if err := hedefKaydet("hedef.sil", yol, kalan); err != nil {
+				return err
+			}
 		}
 		audit("OK", "hedef.sil", yol, "")
 		// The target is only removed from the list; backup files there are not deleted.
@@ -169,6 +299,7 @@ func cmdYedek(args []string) error {
 	if err != nil {
 		return err
 	}
+	kullaniciHedefleriUyar(c)
 	hs := hedefler(c)
 	if len(hs) == 0 {
 		fmt.Println("(no targets) - kasa target add <dir>")

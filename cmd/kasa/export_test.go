@@ -122,7 +122,7 @@ func TestYedegiYazDogrular(t *testing.T) {
 
 func TestExportYollariHerHedefeBirer(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
-	c := &Config{Hedefler: []string{a, b}}
+	c := &Config{kilitliHedefler: []string{a, b}}
 	yollar, err := exportYollari(nil, map[string]string{}, c, false)
 	if err != nil {
 		t.Fatal(err)

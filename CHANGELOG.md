@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.4.0 — 2026-11-10
+
+Behaviour changes, from an independent audit:
+
+- **Locked profiles: no symlink match, resolved pins.** In a profile from `/usr/local/etc/kasa/profiles.json` the command must be exactly the allowed path; a symlink to it (`/tmp/x -> /usr/bin/tool`) is refused, since it could be swapped between the check and `exec`. A pinned path argument is passed to the command as the resolved path that was checked, not as given. `kasa profile test` follows the same rule. Unlocked profiles are unchanged (venv symlinks keep working).
+- **Locked profiles: `PYTHONNOUSERSITE=1`.** Python's user site (`usercustomize.py`, `.pth`) no longer runs with the secrets of a locked profile. Unlocked profiles are unchanged.
+- **Backup targets only from the locked file.** `export`, `target ls` and `backup ls` read targets only from `hedefler` in the root-owned `/usr/local/etc/kasa/profiles.json`. `hedefler` in `~/.config/kasa/profiles.json` (agent-writable) is ignored everywhere, also in a human terminal, with a stderr warning that prints the migration command; a human can still use `kasa export --target <dir>`. `kasa target add|rm` is human-only (`requireHuman`) and prints the exact `sudo /usr/bin/plutil ...` command when it cannot write the locked file; it never runs kasa as root. `target rm` also clears a leftover entry from the user file.
+- **Migration:** run the command from the warning (`kasa target ls` shows it), check that the file is still `root:wheel -rw-r--r--`, then delete the `hedefler` key from `~/.config/kasa/profiles.json` by hand (`kasa target rm` would also remove it from the locked list).
+- Tests: symlink and retargeted-symlink cases for locked commands and pins, unlocked behaviour unchanged, targets only from the locked file, `target add|rm` refused for an agent, sudo command when the locked file is not writable, `PYTHONNOUSERSITE` only when locked.
+- Docs: SECURITY.md, README (EN/TR).
+
 ## 2.3.1 — 2026-11-09
 
 - **Fix: `kasa run` with a non-terminal output runs the command via `exec` again.** 2.3.0 ran it as a child of kasa so the output could be masked. That broke two things: `perl -e 'alarm 2; exec @ARGV' kasa run p -- cmd | cat` (the timeout pattern trend-radar uses) delivered SIGALRM to kasa and the command ran on, and `kill -9 <kasa pid>` (what Python's `subprocess.run(timeout=)` does) left the command orphaned with the secrets in its environment.

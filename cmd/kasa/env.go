@@ -127,9 +127,17 @@ func moduSabitli(eslesen string) bool {
 // sys.path, so an agent could run a fake pkg/mod.py from any directory.
 // PYTHONSAFEPATH=1 (Python 3.11+) stops that. It is added AFTER cocukOrtami,
 // which drops every PYTHON* name, and only for an entry that pins "-m".
-func sabitliOrtam(env []string, eslesen string) []string {
+//
+// kilitli (a locked profile): PYTHONNOUSERSITE=1 as well, so a
+// usercustomize.py or .pth file in the user's (agent-writable) site directory
+// does not run with the secrets in the environment. Unlocked profiles keep
+// user site, scripts there depend on it.
+func sabitliOrtam(env []string, eslesen string, kilitli bool) []string {
 	if moduSabitli(eslesen) {
-		return append(env, "PYTHONSAFEPATH=1")
+		env = append(env, "PYTHONSAFEPATH=1")
+	}
+	if kilitli {
+		env = append(env, "PYTHONNOUSERSITE=1")
 	}
 	return env
 }
