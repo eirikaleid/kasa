@@ -34,6 +34,9 @@ If you add it, verify in a new shell: `zsh -ic 'echo $KASA_HISTORY_GUARD'` (or t
 
 ```bash
 kasa status          # locked or unlocked, who is calling
+kasa status -q       # no output; exit 0 unlocked, 3 locked, 4 no vault (`--json` for fields). Scripts read this, never the text
+kasa doctor          # one-line diagnosis and what to do; exit 0 ok, 1 warning, 2 failure (never prints a value)
+kasa backup verify --latest   # do the newest backup and the vault hold the same key names? exit 0 / 1 / 2 (names only; allowed in agent sessions)
 kasa ls              # key names (no values), e.g. github/token
 kasa profile ls      # profiles: which env vars, which commands are allowed
 ```

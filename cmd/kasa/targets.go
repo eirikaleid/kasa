@@ -292,8 +292,11 @@ func cmdYedek(args []string) error {
 	if len(args) > 0 {
 		sub = args[0]
 	}
+	if sub == "verify" {
+		return cmdYedekDogrula(args[1:])
+	}
 	if sub != "ls" && sub != "list" {
-		return fmt.Errorf("usage: kasa backup ls")
+		return fmt.Errorf("usage: kasa backup ls | verify <file.age> | --latest")
 	}
 	c, err := loadConfig()
 	if err != nil {

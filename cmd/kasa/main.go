@@ -10,6 +10,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -23,86 +24,117 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.6.0"
+const version = "2.7.0"
 
-func main() {
-	if len(os.Args) < 2 {
+func main() { os.Exit(kasaMain(os.Args[1:])) }
+
+// kasaMain: the whole CLI as a function of its arguments, returning the exit
+// code, so tests can drive it in-process.
+func kasaMain(args []string) int {
+	if len(args) < 1 {
 		usage()
-		os.Exit(1)
+		return 1
+	}
+	// Help and unknown flags are decided BEFORE any command runs (bayrak.go):
+	// `kasa export --help` used to start a real export.
+	if yardim, err := bayrakOnKontrol(args[0], args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "error: "+err.Error())
+		fmt.Fprint(os.Stderr, yardim)
+		return 2
+	} else if yardim != "" {
+		fmt.Print(yardim)
+		return 0
 	}
 	var err error
-	switch os.Args[1] {
+	switch args[0] {
 	case "init":
 		err = cmdInit()
 	case "unlock":
-		err = cmdUnlock(os.Args[2:])
+		err = cmdUnlock(args[1:])
 	case "morning", "sabah":
 		err = cmdSabah()
 	case "lock":
 		err = kcLock()
 	case "status":
-		err = cmdStatus()
+		err = cmdStatus(args[1:])
+	case "doctor":
+		err = cmdDoctor(args[1:])
 	case "add", "set":
-		err = cmdAdd(os.Args[2:])
+		err = cmdAdd(args[1:])
 	case "ls", "list":
 		err = cmdLs()
 	case "get":
-		err = cmdGet(os.Args[2:])
+		err = cmdGet(args[1:])
 	case "rm", "delete":
-		err = cmdRm(os.Args[2:])
+		err = cmdRm(args[1:])
 	case "run":
-		err = cmdRun(os.Args[2:])
+		err = cmdRun(args[1:])
 	case "__maske":
-		err = cmdMaske(os.Args[2:])
+		err = cmdMaske(args[1:])
 	case "which", "lookup":
-		err = cmdWhich(os.Args[2:])
+		err = cmdWhich(args[1:])
 	case "shell-init":
-		err = cmdShellInit(os.Args[2:])
+		err = cmdShellInit(args[1:])
 	case "mail":
-		err = cmdMail(os.Args[2:])
+		err = cmdMail(args[1:])
 	case "profile":
-		err = cmdProfile(os.Args[2:])
+		err = cmdProfile(args[1:])
 	case "audit":
-		err = cmdAudit(os.Args[2:])
+		err = cmdAudit(args[1:])
 	case "export":
-		err = cmdExport(os.Args[2:])
+		err = cmdExport(args[1:])
 	case "import":
-		err = cmdImport(os.Args[2:])
+		err = cmdImport(args[1:])
 	case "target", "targets", "hedef":
-		err = cmdHedef(os.Args[2:])
+		err = cmdHedef(args[1:])
 	case "backup", "backups", "yedek":
-		err = cmdYedek(os.Args[2:])
+		err = cmdYedek(args[1:])
 	case "backup-password", "yedek-parola":
-		err = cmdYedekParola(os.Args[2:])
+		err = cmdYedekParola(args[1:])
 	case "acl":
-		err = cmdAcl(os.Args[2:])
+		err = cmdAcl(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("kasa " + version)
 	case "help", "-h", "--help":
 		usage()
 	default:
-		err = fmt.Errorf("unknown command: %s", os.Args[1])
+		err = fmt.Errorf("unknown command: %s", args[0])
+	}
+	// A code the command chose itself (status, backup verify, doctor): its
+	// output is already written, nothing more is printed here.
+	var kod cikisKodu
+	if errors.As(err, &kod) {
+		return int(kod)
 	}
 	if errors.Is(err, errEslesmeYok) {
-		os.Exit(1)
+		return 1
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: "+err.Error())
 		if errors.Is(err, errKilitli) {
-			os.Exit(75) // EX_TEMPFAIL
+			return 75 // EX_TEMPFAIL
 		}
 		if errors.Is(err, errMaskeleyici) {
-			os.Exit(70) // EX_SOFTWARE
+			return 70 // EX_SOFTWARE
 		}
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
+
+// cikisKodu: returned by a command that has already printed its result and
+// only wants a specific exit code (0 is never returned this way).
+type cikisKodu int
+
+func (k cikisKodu) Error() string { return fmt.Sprintf("exit code %d", int(k)) }
 
 func usage() {
 	fmt.Print(`kasa ` + version + ` - secret store
 
   kasa init                     create the vault (once)
-  kasa unlock | lock | status   unlock / lock / show state
+  kasa unlock | lock            unlock / lock
+  kasa status [-q | --json]     show state; exit 0 unlocked, 3 locked, 4 no vault
+  kasa doctor [profile] [--json] diagnose; exit 0 ok, 1 warning, 2 failure, 75 locked
   kasa unlock --gui             unlock with the macOS password dialog
   kasa morning                  prompt with a dialog if not unlocked today (LaunchAgent, every 10 min)
 
@@ -128,6 +160,7 @@ func usage() {
   kasa export                   write an encrypted backup to all targets
   kasa export --target <dir>    write to a one-off target
   kasa backup ls                which backup is on which target, and how old
+  kasa backup verify <file.age> | --latest [--json]   compare a backup's key names with the vault; exit 0 same, 1 differs, 2 could not open, 75 locked
   kasa backup-password status|set|rm
                                 keep the export password in the keychain  [set: human only]
   kasa import <file.age>        restore a backup onto this machine  [after init+unlock]
@@ -295,27 +328,89 @@ func acildiktanSonra() {
 	sabahIsaretle()
 }
 
-func cmdStatus() error {
-	fmt.Println("vault     : " + keychainPath())
+// Exit codes of `kasa status`. EXTERNAL SCRIPTS DEPEND ON THESE (and on the
+// --json fields): TestStatusSozlesmesi pins them; change one and the test
+// breaks on purpose. 4 also covers a vault that exists but cannot be used (still
+// at the old place, or the move to the new place is unfinished).
+const (
+	statusAcik    = 0
+	statusKilitli = 3
+	statusYok     = 4
+)
+
+// statusDurumu: "unlocked" | "locked" | "missing", with the old-place text for
+// the human output when the vault is unusable for that reason.
+func statusDurumu() (durum, not string) {
 	if !keychainExists() {
 		if e := eskiKasaYolu(); e != "" {
-			fmt.Println("state     : the vault is still at its old place: " + e + " (kasa acl tasi <backup.age>, README: Upgrading)")
-			return nil
+			return "missing", "the vault is still at its old place: " + e + " (kasa acl tasi <backup.age>, README: Upgrading)"
 		}
-		fmt.Println("state     : not set up (kasa init)")
-		return nil
+		return "missing", "not set up (kasa init)"
 	}
 	if e := tasiYarim(); e != "" {
-		fmt.Println("state     : the move from the old place is UNFINISHED; the old vault is still at " + e + " (kasa acl tasi <backup.age>, README: Upgrading)")
-		return nil
+		return "missing", "the move from the old place is UNFINISHED; the old vault is still at " + e + " (kasa acl tasi <backup.age>, README: Upgrading)"
 	}
-	locked := isLocked()
-	if locked {
-		fmt.Println("state     : LOCKED (kasa unlock)")
-	} else {
-		fmt.Println("state     : unlocked")
+	if isLocked() {
+		return "locked", "LOCKED (kasa unlock)"
 	}
-	if !locked {
+	return "unlocked", "unlocked"
+}
+
+func statusKodu(durum string) int {
+	switch durum {
+	case "unlocked":
+		return statusAcik
+	case "locked":
+		return statusKilitli
+	}
+	return statusYok
+}
+
+// cmdStatus: the human output is unchanged; the exit code (0 unlocked, 3
+// locked, 4 no usable vault) is the machine interface. -q prints nothing, --json
+// prints {"state","keys","profiles","version"}. The human text is for people:
+// do not grep it from scripts, use the exit code or --json.
+func cmdStatus(args []string) error {
+	// bayrakVar, not parseFlags: parseFlags would take a word after --json as its value.
+	sessiz := bayrakVar(args, "q", "quiet")
+	jsonCikti := bayrakVar(args, "json")
+	if sessiz && jsonCikti {
+		fmt.Fprintln(os.Stderr, "error: usage: kasa status [-q | --json] (not both)")
+		return cikisKodu(2)
+	}
+	durum, not := statusDurumu()
+	kod := statusKodu(durum)
+	if sessiz {
+		return kodDon(kod)
+	}
+	if jsonCikti {
+		keys, profiller := 0, 0
+		if durum == "unlocked" {
+			if k, err := kcList(); err == nil {
+				keys = len(k)
+			}
+		}
+		if durum != "missing" {
+			if c, _ := loadConfig(); c != nil {
+				profiller = len(c.Profiles)
+			}
+		}
+		b, _ := json.Marshal(struct {
+			State    string `json:"state"`
+			Keys     int    `json:"keys"`
+			Profiles int    `json:"profiles"`
+			Version  string `json:"version"`
+		}{durum, keys, profiller, version})
+		fmt.Println(string(b))
+		return kodDon(kod)
+	}
+	fmt.Println("vault     : " + keychainPath())
+	if durum == "missing" {
+		fmt.Println("state     : " + not)
+		return kodDon(kod)
+	}
+	fmt.Println("state     : " + not)
+	if durum == "unlocked" {
 		if keys, err := kcList(); err == nil {
 			fmt.Printf("keys      : %d\n", len(keys))
 		}
@@ -327,7 +422,15 @@ func cmdStatus() error {
 		who = "human (TTY: " + map[bool]string{true: "yes", false: "no"}[isTTY()] + ")"
 	}
 	fmt.Println("caller    : " + who)
-	return nil
+	return kodDon(kod)
+}
+
+// kodDon: nil for 0, otherwise the exit code as an error main understands.
+func kodDon(kod int) error {
+	if kod == 0 {
+		return nil
+	}
+	return cikisKodu(kod)
 }
 
 func cmdAdd(args []string) error {

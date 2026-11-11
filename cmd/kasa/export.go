@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -492,6 +493,8 @@ func sealBundle(plain []byte, pass string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+var errYedekAcilamadi = errors.New("not a kasa backup or wrong password")
+
 func openBundle(enc []byte, pass string) ([]byte, error) {
 	id, err := age.NewScryptIdentity(pass)
 	if err != nil {
@@ -503,7 +506,9 @@ func openBundle(enc []byte, pass string) ([]byte, error) {
 	}
 	r, err := age.Decrypt(src, id)
 	if err != nil {
-		return nil, fmt.Errorf("could not open backup (the password may be wrong): %w", err)
+		// A constant text, never err: age quotes the first bytes of a malformed
+		// input in its message, which would show the start of any file given.
+		return nil, errYedekAcilamadi
 	}
 	return io.ReadAll(r)
 }

@@ -24,6 +24,9 @@ Optional: after building and installing kasa, you may add the shell integration 
 
 ```bash
 kasa status        # locked or unlocked
+kasa status -q     # silent; exit 0 unlocked, 3 locked, 4 no vault (--json for fields): read the code, not the text
+kasa doctor        # diagnosis with fixes; exit 0 ok, 1 warning, 2 failure (prints no value)
+kasa backup verify --latest   # newest backup vs vault, key names only; exit 0 same, 1 differs, 2 could not open
 kasa ls            # key names only
 kasa profile ls    # profiles, their env var names and allowed commands
 kasa profile test <profile> -- <command> [args]   # dry run: allowed? (runs nothing, exit 1 if refused)

@@ -136,12 +136,70 @@ Hazır dosyalar:
 
 Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `kasa get` çağırma, `kasa run` kullan. `kasa` `75` ile çıkarsa kilitlidir: insandan `kasa unlock` çalıştırmasını iste.
 
+## Betiklerden kullanım
+
+Kasa'yı çağıran betikler metni değil **çıkış kodunu** ya da `--json` çıktısını okumalıdır. İnsan çıktısı 2.4'ten beri İngilizcedir; eski Türkçe `durum : acik` satırını arayan bir betik çalışmaya devam etti ve işini günlerce sessizce atladı. Metin insanlar içindir ve değişebilir. Aşağıdaki çıkış kodları ve JSON alanları sabit bir arayüzdür, testlerle sabitlenmiştir: yalnız büyük sürümde değişir.
+
+```bash
+kasa status -q                   # hiçbir şey basmaz, yalnız çıkış kodu
+kasa status --json               # {"state":"unlocked","keys":12,"profiles":3,"version":"2.7.0"}
+```
+
+| `kasa status` çıkışı | Anlamı |
+|---|---|
+| `0` | açık |
+| `3` | kilitli (`kasa unlock`) |
+| `4` | kullanılabilir kasa yok: kurulmamış, eski yerinde ya da yeni yere taşıma yarım |
+
+2.7.0'dan önce `kasa status` her durumda 0 ile çıkıyordu. `set -e` altındaki bir betik artık kilitli kasada durur: kodu bilerek okuyun ya da eski davranış için `kasa status || true` yazın.
+
+`state` değeri `unlocked`, `locked` ya da `missing`'dir. `keys`, kasa açık değilse 0'dır. Açık kasa isteyen diğer komutlar kasa kilitliyken `75` ile çıkar.
+
+```bash
+if ! kasa status -q; then echo "kasa açık değil (çıkış $?)"; exit 1; fi
+kasa run yedek-isi -- ./gece.sh
+```
+
+**`kasa backup verify <dosya.age> | --latest`**, bir yedeğin hâlâ kasayla uyuşup uyuşmadığını denetler. Dosyayı bellekte, keychain'deki yedek parolasıyla açar (`export`'un kullandığı parola; hiç sorulmaz), diske düz metin yazmaz ve canlı kasayla yalnız anahtar **adlarını** karşılaştırır. Değer asla basılmaz, kasanın değerleri okunmaz bile. `--latest`, tüm hedeflerdeki en yeni `.age` dosyasını alır.
+
+```bash
+kasa backup verify --latest
+kasa backup verify ~/Yedekler/kasa-yedek-20261110.age --json
+```
+
+| Çıkış | Anlamı |
+|---|---|
+| `0` | anahtar adları aynı |
+| `1` | farklı: çıktı yalnız yedekte ve yalnız kasada olan adları listeler (`kasa export` ile tazele) |
+| `2` | açılamadı: yedek parolası yok, düz dosya değil ya da 64 MB'tan büyük, dosya yok, kasa yedeği değil ya da yanlış parola, hiçbir hedefte yedek yok |
+| `75` | kasa kilitli (her komutta olduğu gibi; `kasa unlock`'tan sonra yeniden dene) |
+
+`--json`: `{"result":"match|different|unreadable","file":"...","created":"...","backup_keys":N,"vault_keys":N,"only_in_backup":[...],"only_in_vault":[...]}`; çıkış 2'de `error` nedeni taşır. Yedekten sonra değişen bir değer yakalanmaz: yalnız adlar karşılaştırılır. Ajan oturumları çalıştırabilir ([AGENTS.md](AGENTS.md)).
+
+**`kasa doctor [profil]`**, bir betik durduğunda ilk koşulacak komuttur: kontrol başına bir satır ve ne yapılacağı.
+
+```text
+kasa doctor 2.7.0: WARN
+  OK    vault            unlocked
+  OK    read             ok: this kasa reads the vault's items
+  WARN  backup-password  not stored: export and backup verify cannot run unattended
+        -> kasa backup-password set (human only)
+  WARN  backup           /Volumes/Backup/kasa: newest backup is 51 h old (limit 36 h)
+        -> kasa export
+```
+
+Kasanın var ve açık olduğunu, bu ikilinin kalemleri okuyabildiğini (`kasa acl yokla` yoklaması), yedek parolasının kayıtlı olduğunu ve hedef başına en yeni yedeğin yaşını denetler (36 saati aşarsa uyarı). Profil adı verilirse ayrıca profilin var olduğunu, allow listesinin boş olmadığını (mail profili için gerekmez), her izinli komutun bulunduğunu ve `profile test`'ten geçeceğini, profilin kullandığı her anahtarın kasada olduğunu denetler. Çıkış `0` sağlıklı, `1` uyarı, `2` arıza (kullanılabilir kasa yok, kalemler okunamıyor, `profiles.json` okunamıyor, profil yok, anahtar eksik), `75` kilitli (rapor yine basılır). `--json`: `{"status":"ok|warn|fail","version":"...","checks":[{"name","status","detail","fix"}]}`. Hiçbir sır basmaz.
+
+Her alt komut `--help`/`-h` alır; yalnız kullanımı basar, başka bir şey yapmaz. Bilinmeyen bayrak, kullanımla birlikte hatadır ve çıkış kodu `2`'dir; varsayılan bir eyleme düşmez. Eski Türkçe bayraklar (`--ustune-yaz`, `--hedef`, `--pencere` ve diğerleri) çalışmaya devam eder.
+
 ## Komutlar
 
 | Komut | Açıklama | Kim |
 |---|---|---|
 | `kasa init` | Keychain'i oluştur (bir kez) | insan |
 | `kasa unlock` / `kasa lock` / `kasa status` | Aç, kilitle, durum ve çağıran | unlock: insan |
+| `kasa status [-q \| --json]` | Makine arayüzü: çıkış 0 açık, 3 kilitli, 4 kasa yok; `-q` hiçbir şey basmaz; bkz. [Betiklerden kullanım](#betiklerden-kullanım) | herkes |
+| `kasa doctor [profil] [--json]` | Kasa, okunabilirlik, yedek parolası, yedek yaşı ve profili teşhis et; çıkış 0 / 1 uyarı / 2 arıza | herkes |
 | `kasa unlock --gui` | macOS parola penceresiyle aç | insan |
 | `kasa morning` | Bugün açılmadıysa pencereyle parola sor ([launchd](contrib/launchd/README.md) için) | zamanlayıcı |
 | `kasa add <ns/anahtar>` | Sır ekle (gizli giriş) | insan |
@@ -160,6 +218,7 @@ Ajanlar için tek kural: kullanıcıdan asla sır yapıştırmasını isteme, `k
 | `kasa export` | Tüm hedeflere şifreli yedek yaz | yedek parolası gerekir |
 | `kasa export --target <dizin>` | Tek seferlik hedef ([Yedekler](#yedekler) altındaki ajan notuna bakın) | yedek parolası gerekir |
 | `kasa backup ls` | Hedef başına yedekleri ve yaşlarını göster | herkes |
+| `kasa backup verify <dosya.age> \| --latest [--json]` | Yedeği bellekte aç, anahtar adlarını kasayla karşılaştır; çıkış 0 aynı, 1 farklı, 2 açılamadı, 75 kilitli | herkes (hiçbir değer çıkmaz) |
 | `kasa backup-password status\|set\|rm` | Saklanan yedek parolasını yönet | set/rm: insan |
 | `kasa import <dosya.age> [--overwrite]` | Yedeği bu makineye geri yükle | yalnız insan + TTY |
 | `kasa acl migrate [--dry-run] [--target <dizin>]` | 2.5.0 öncesi kalemleri kasa'nın kendi ACL'ine taşı (önce şifreli yedek alır, geri yükleme denetimi yapar) | yalnız insan |
