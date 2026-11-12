@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.7.1 — 2026-11-12
+
+- **`kasa status` no longer swallows an unreadable or corrupt `profiles.json`.** The error goes to stderr and the exit code is 1 (not 0), for the human text, `-q` and `--json`, so a script calling `kasa status -q` sees a failure. 1 is the general error code and stays apart from the state codes (0 unlocked, 3 locked, 4 no vault) and from 2, which in `status` is a usage error; `doctor` keeps reporting the same fault as 2 in its own scale. The config is checked before the vault state, so a corrupt file wins over 3 and 4. Before, the human text could also panic on it. Pinned by `TestStatusBozukYapilandirma`.
+- **An unknown command exits 2 (usage error), not 1,** and the usage goes to stderr (stdout stays empty), like an unknown flag. Pinned by `TestBilinmeyenKomut`.
+
 ## 2.7.0 — 2026-11-10
 
 A stable machine interface and self-diagnosing commands. Scripts that grepped `kasa status` text broke silently when the output turned English in 2.4 (a backup job skipped four days); they now read exit codes or JSON.

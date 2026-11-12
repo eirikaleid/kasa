@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,7 +25,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const version = "2.7.0"
+const version = "2.7.1"
 
 func main() { os.Exit(kasaMain(os.Args[1:])) }
 
@@ -98,7 +99,11 @@ func kasaMain(args []string) int {
 	case "help", "-h", "--help":
 		usage()
 	default:
-		err = fmt.Errorf("unknown command: %s", args[0])
+		// A usage error (2), like an unknown flag; usage goes to stderr so a
+		// script's stdout stays clean.
+		fmt.Fprintln(os.Stderr, "error: unknown command: "+args[0])
+		usageYaz(os.Stderr)
+		return 2
 	}
 	// A code the command chose itself (status, backup verify, doctor): its
 	// output is already written, nothing more is printed here.
@@ -128,8 +133,10 @@ type cikisKodu int
 
 func (k cikisKodu) Error() string { return fmt.Sprintf("exit code %d", int(k)) }
 
-func usage() {
-	fmt.Print(`kasa ` + version + ` - secret store
+func usage() { usageYaz(os.Stdout) }
+
+func usageYaz(w io.Writer) {
+	fmt.Fprint(w, `kasa `+version+` - secret store
 
   kasa init                     create the vault (once)
   kasa unlock | lock            unlock / lock
@@ -378,6 +385,12 @@ func cmdStatus(args []string) error {
 		fmt.Fprintln(os.Stderr, "error: usage: kasa status [-q | --json] (not both)")
 		return cikisKodu(2)
 	}
+	// An unreadable or corrupt profiles.json is an error (1), not a state: it
+	// is checked first so `status -q` cannot report a healthy 0 over it.
+	c, err := loadConfig()
+	if err != nil {
+		return err
+	}
 	durum, not := statusDurumu()
 	kod := statusKodu(durum)
 	if sessiz {
@@ -391,9 +404,7 @@ func cmdStatus(args []string) error {
 			}
 		}
 		if durum != "missing" {
-			if c, _ := loadConfig(); c != nil {
-				profiller = len(c.Profiles)
-			}
+			profiller = len(c.Profiles)
 		}
 		b, _ := json.Marshal(struct {
 			State    string `json:"state"`
@@ -415,7 +426,6 @@ func cmdStatus(args []string) error {
 			fmt.Printf("keys      : %d\n", len(keys))
 		}
 	}
-	c, _ := loadConfig()
 	fmt.Printf("profiles  : %d\n", len(c.Profiles))
 	who := agentName()
 	if who == "" {

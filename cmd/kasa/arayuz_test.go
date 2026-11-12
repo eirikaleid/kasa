@@ -592,3 +592,36 @@ func TestStatusBayrakSonrasiKelime(t *testing.T) {
 		t.Errorf("-q --json: %d %q", kod, errOut)
 	}
 }
+
+// TestStatusBozukYapilandirma: an unreadable or corrupt profiles.json is an
+// error for every status form (1 plus the reason on stderr), never the exit
+// code of a state. `status -q` in a backup script must see it as a failure.
+// No keychain is touched: the config is checked before the vault.
+func TestStatusBozukYapilandirma(t *testing.T) {
+	d := profilEvi(t, map[string]Profile{"a": {}})
+	kasaYoluTest(t, filepath.Join(d, "yok", "kasa.keychain-db"))
+	if err := os.WriteFile(configPath(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range [][]string{{"status"}, {"status", "-q"}, {"status", "--json"}} {
+		kod, out, errOut := calis(t, a...)
+		if kod != 1 || !strings.Contains(errOut, "profiles.json is corrupt") {
+			t.Errorf("%v: exit %d stderr %q, want 1 and the reason", a, kod, errOut)
+		}
+		if out != "" {
+			t.Errorf("%v printed on stdout: %q", a, out)
+		}
+	}
+}
+
+// TestBilinmeyenKomut: a usage error is 2 (like an unknown flag), the usage
+// goes to stderr and stdout stays empty.
+func TestBilinmeyenKomut(t *testing.T) {
+	kod, out, errOut := calis(t, "nosuchcmd")
+	if kod != 2 || out != "" {
+		t.Errorf("exit %d stdout %q, want 2 and empty stdout", kod, out)
+	}
+	if !strings.Contains(errOut, "unknown command: nosuchcmd") || !strings.Contains(errOut, "kasa init") {
+		t.Errorf("stderr lacks the error or the usage: %q", errOut)
+	}
+}
